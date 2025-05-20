@@ -467,7 +467,7 @@ function Show-ModuleCommandViewer {
                         }
                         ([System.ConsoleKey]::RightArrow) {
                             if ($helpOptions[$currentHelpOptionIndex] -eq "Online") {
-                                try { Get-Help $currentCommandObjectForHelp.CommandInfo -Online 
+                                try { Get-Help $currentCommandObjectForHelp.CommandInfo -Online
                                 } catch {
                                     $currentHelpContentLines = "[red]Could not retrieve online help[/]"
                                 }
@@ -477,7 +477,7 @@ function Show-ModuleCommandViewer {
                         }
                         ([System.ConsoleKey]::Enter) {
                             if ($helpOptions[$currentHelpOptionIndex] -eq "Online") {
-                                try { Get-Help $currentCommandObjectForHelp.CommandInfo -Online 
+                                try { Get-Help $currentCommandObjectForHelp.CommandInfo -Online
                                 }
                                 catch {
                                     $currentHelpContentLines = "[red]Could not retrieve online help[/]"
