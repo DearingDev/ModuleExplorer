@@ -15,8 +15,7 @@
 
 .PARAMETER Filter
     An optional string used to filter the list of displayed modules.
-    The function will search for modules whose names contain the filter string.
-    Wildcards are automatically added around the provided filter string (e.g., if you provide "Util", it searches for "*Util*").
+    The function will search for modules whose names matches the filter string.
 
     Type: String
     Position: Named

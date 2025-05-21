@@ -300,7 +300,7 @@ function Show-ModuleCommandViewer {
                     
                     $visibleHelpLines = New-Object System.Collections.Generic.List[string]
                     if ($currentHelpContentLines.Count -gt 0) {
-                        if ($helpContentScrollOffset -gt 0) { $visibleHelpLines.Add("[grey]  ↑ ... (scroll up) ...[/]")}
+                        if ($helpContentScrollOffset -gt 0) { $visibleHelpLines.Add("[grey]  ↑ ...[/]")}
                         
                         $helpViewEndIndex = [System.Math]::Min(($helpContentScrollOffset + $helpContentPageSize - 1), ($currentHelpContentLines.Count - 1))
                         for ($l = $helpContentScrollOffset; $l -le $helpViewEndIndex; $l++) {
@@ -309,7 +309,7 @@ function Show-ModuleCommandViewer {
                             }
                         }
 
-                        if ($helpViewEndIndex -lt ($currentHelpContentLines.Count - 1)) { $visibleHelpLines.Add("[grey]  ↓ ... (scroll down) ...[/]")}
+                        if ($helpViewEndIndex -lt ($currentHelpContentLines.Count - 1)) { $visibleHelpLines.Add("[grey]  ↓ ...[/]")}
                     } else {
                         $visibleHelpLines.Add($currentHelpContent)
                     }
