@@ -1,6 +1,19 @@
 ﻿# ModuleExplorer
 
-ModuleExplorer is a PowerShell module that provides an interactive, terminal-based user interface to browse and explore PowerShell modules and their commands.
+ModuleExplorer is a PowerShell module that provides an interactive, terminal-based user interface (TUI) to browse and explore PowerShell modules and their commands and parameters.
+
+## Installation
+
+```powershell
+Install-Module -Name ModuleExplorer
+```
+
+## Quick Start
+
+```powershell
+Show-ModuleExplorer
+```
+`Show-ModuleExplorer` function opens up the TUI launcher to view installed modules.
 
 ## Features
 
@@ -13,3 +26,12 @@ ModuleExplorer is a PowerShell module that provides an interactive, terminal-bas
 ## How it Works
 
 The primary function `Show-ModuleExplorer` displays a list of available PowerShell modules. Upon selecting a module, it calls `Show-ModuleCommandViewer` to display the commands within that module. The interface allows for viewing the helps pages of a particular module.
+
+## Credits
+
+- Friedrich Weinmann
+  - https://github.com/PowershellFrameworkCollective/PSModuleDevelopment
+- Shaun Lawrie
+  - https://github.com/ShaunLawrie/PwshSpectreConsole
+- Andrew Pla
+  - https://github.com/AndrewPla
