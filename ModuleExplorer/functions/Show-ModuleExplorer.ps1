@@ -91,14 +91,20 @@ function Show-ModuleExplorer {
             # Reset the main loop if modules changes (install/remove)
             $moduleLookup.Clear()
             $moduleChoices = @($exitChoiceString, $refreshChoiceString)
-            
-            $moduleChoices += $availableModules | ForEach-Object {
-                $versionString = if ($_.Version) { "v$($_.Version)" } else { "Version N/A" }
-                $displayName = "$($_.Name) ($versionString)"
-                $moduleLookup[$displayName] = $_ # Populate the lookup table
-                $displayName
+
+            $processedDisplayNames = @{}
+
+            foreach ($module in $availableModules) {
+                $versionString = if ($module.Version) { "v$($module.Version)"} else { "Version N/A" }
+                $displayName = "$($module.Name) ($versionString)"
+
+                if (-not $processedDisplayNames.ContainsKey($displayName)) {
+                    $moduleLookup[$displayName] = $module
+                    $moduleChoices += $displayName
+                    $processedDisplayNames[$displayName] = $true
+                }
             }
-            
+
             $promptTitle = "[yellow bold]Select a PowerShell Module to Explore (or Exit):[/]"
             Write-SpectreRule -Title "[grey] Installed Modules: $($availableModules.Count) [/]" -Alignment Center
             $selectedModuleDisplay = Read-SpectreSelection -Message $promptTitle -PageSize 15 -Choices $moduleChoices -EnableSearch
@@ -122,7 +128,7 @@ function Show-ModuleExplorer {
                 Read-SpectrePause -Message "[grey]Press Enter to continue...[/]" -NoNewline
                 continue
             }
-            
+
             Clear-Host
             Show-ModuleCommandViewer -SelectedModule $selectedModuleObject
 
