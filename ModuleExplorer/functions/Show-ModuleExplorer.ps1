@@ -79,12 +79,18 @@ function Show-ModuleExplorer {
                 $moduleQuery.Name = $Filter
             }
 
-            Invoke-SpectreCommandWithStatus -ScriptBlock { $availableModules = Get-Module @moduleQuery |
+            # Invoke-SpectreCommandWithStatus -ScriptBlock { $availableModules = Get-Module @moduleQuery |
+            #     Select-Object Name, Version, Path, ModuleBase, RootModule,
+            #     @{Name = 'Prefix'; Expression = { ($_.Name -split '\.')[0] } } |
+            #     Sort-Object Name
+            #     $availableModules
+            # } -Title "Loading PowerShell Modules..." -Spinner "Shark"
+
+            $availableModules = Get-Module @moduleQuery |
                 Select-Object Name, Version, Path, ModuleBase, RootModule,
                 @{Name = 'Prefix'; Expression = { ($_.Name -split '\.')[0] } } |
                 Sort-Object Name
-                $availableModules | Out-Null
-            } -Title "Loading PowerShell Modules..." -Spinner "Shark"
+                $availableModul
 
             $categories = $availableModules |
                 Group-object Prefix |
