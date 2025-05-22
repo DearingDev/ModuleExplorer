@@ -38,10 +38,6 @@ Launches the Module Explorer and filters the initial list to show only modules
 named "BurnToast".
 
 .NOTES
-This function depends on several cmdlets from a PowerShell module providing Spectre.Console integration
-(e.g., Write-SpectreFigletText, Read-SpectreSelection, Write-SpectreHost, Write-SpectreRule, Read-SpectrePause, Get-SpectreEscapedText)
-for its user interface. Ensure this module and its dependencies are installed and available.
-
 Upon selecting a module, this function calls `Show-ModuleCommandViewer` to display
 the commands within that module.
 
@@ -57,7 +53,8 @@ This function does not accept input from the pipeline.
 
 .OUTPUTS
 None
-This function does not return any objects to the pipeline. It provides an interactive display in the console.
+This function does not return any objects to the pipeline.
+It provides an interactive display in the console.
 
 .LINK
 None
@@ -71,23 +68,39 @@ function Show-ModuleExplorer {
     try {
         $moduleLookup = @{} # Initialize hashtable to map display names to module objects
         $minModulesForCategory = 10
+        $hideGroupedModules = $false
 
         while ($true) {
             Clear-Host
             Write-SpectreFigletText -Text "Module Explorer" -Alignment "Center"
+
             $moduleQuery = @{ ListAvailable = $true }
             if ($Filter) {
                 $moduleQuery.Name = $Filter
             }
-            $availableModules = Get-Module @moduleQuery | Select-Object Name, Version, Path, ModuleBase, RootModule, @{Name = 'Prefix'; Expression = { ($_.Name -split '\.')[0] } }  | Sort-Object Name
-            $categories = $availableModules | Group-object Prefix | Where-object Count -ge $minModulesForCategory
 
-            if ($hideBigModules) {
+            Invoke-SpectreCommandWithStatus -ScriptBlock { $availableModules = Get-Module @moduleQuery |
+                Select-Object Name, Version, Path, ModuleBase, RootModule,
+                @{Name = 'Prefix'; Expression = { ($_.Name -split '\.')[0] } } |
+                Sort-Object Name
+                $availableModules | Out-Null
+            } -Title "Loading PowerShell Modules..." -Spinner "Shark"
+
+            $categories = $availableModules |
+                Group-object Prefix |
+                Where-object Count -ge $minModulesForCategory
+
+            $exitChoiceString = "[mediumpurple3_1]<-- Exit[/]"
+            $refreshChoiceString = "[steelblue1_1]Refresh List[/]"
+
+            if ($hideGroupedModules) {
                 $availableModules = $availableModules |
                 Where-Object { $_.Prefix -notin $categories.Name } |
                 Sort-Object Name
+                $groupedModulesChoiceString = "[grey]Show Grouped Modules[/]"
+            } else {
+                $groupedModulesChoiceString = "[grey]Hide Grouped Modules[/]"
             }
-
 
             if (-not $availableModules) {
                 Write-SpectreHost "[bold red]No PowerShell modules found.[/]"
@@ -95,18 +108,12 @@ function Show-ModuleExplorer {
                 return
             }
 
-            $exitChoiceString = "[cyan]<-- Exit[/]"
-            $refreshChoiceString = "[cyan]Refresh List[/]"
-            $hideGroupedModulesString = "[grey]Toggle Grouped Modules[/]"
             # Reset the main loop if modules changes (install/remove)
             $moduleLookup.Clear()
-            $moduleChoices = @($exitChoiceString, $refreshChoiceString, $hideGroupedModulesString)
-
+            $moduleChoices = @($exitChoiceString, $refreshChoiceString, $groupedModulesChoiceString)
             $processedDisplayNames = @{}
 
             foreach ($module in $availableModules) {
-
-                
                 $versionString = if ($module.Version) { "v$($module.Version)" } else { "Version N/A" }
                 $displayName = "$($module.Name) ($versionString)"
 
@@ -118,9 +125,15 @@ function Show-ModuleExplorer {
             }
 
             $promptTitle = "[yellow bold]Select a PowerShell Module to Explore (or Exit):[/]"
-            Write-SpectreRule -Title "[grey] Installed Modules: $($availableModules.Count) [/]" -Alignment Center
-            $selectedModuleDisplay = Read-SpectreSelection -Message $promptTitle -PageSize 15 -Choices $moduleChoices -EnableSearch
+            Write-SpectreRule -Title "[grey]Available Modules: $($availableModules.Count) [/]" -Alignment Center
+            $spectreSelectionQuery = @{
+                Message = $promptTitle;
+                PageSize = 15;
+                Choices = $moduleChoices;
+                EnableSearch = $true
+            }
 
+            $selectedModuleDisplay = Read-SpectreSelection @spectreSelectionQuery
 
             if (-not $selectedModuleDisplay -or $selectedModuleDisplay -eq $exitChoiceString) {
                 Write-SpectreHost "[yellow]Exiting Module Explorer.[/]"
@@ -132,36 +145,37 @@ function Show-ModuleExplorer {
                 continue
             }
 
-            if ($selectedModuleDisplay -eq $hideGroupedModulesString) {
+            if ($selectedModuleDisplay -eq $groupedModulesChoiceString) {
                 Write-SpectreHost "[italic green]Toggling the large modules...[/]"
-                if ($hideBigModules -eq $true) {
+                if ($hideGroupedModules -eq $true) {
                     Write-SpectreHost "[italic green]Showing the large modules...[/]"
-                    $hideBigModules = $false
+                    $hideGroupedModules = $false
                 }
                 else {
-                    $hideBigModules = $true
+                    $hideGroupedModules = $true
                     Write-SpectreHost "[italic green]Hiding the large modules...[/]"
                 }
                 continue
             }
-            
+
             # Use the lookup table
             $selectedModuleObject = $moduleLookup[$selectedModuleDisplay]
 
             if (-not $selectedModuleObject) {
                 # This condition should not be met if $selectedModuleDisplay is from $moduleChoices
-                Write-SpectreHost "[bold red]Error: Could not retrieve details for selected module: '$($selectedModuleDisplay | Get-SpectreEscapedText)'. This is unexpected.[/]"
+                Write-SpectreHost "[bold red]Error: Could not retrieve details for selected module: '
+                    $($selectedModuleDisplay | Get-SpectreEscapedText)'. This is unexpected.[/]"
                 Read-SpectrePause -Message "[grey]Press Enter to continue...[/]" -NoNewline
                 continue
             }
 
             Clear-Host
             Show-ModuleCommandViewer -SelectedModule $selectedModuleObject
-
         } # End of main loop
     }
     catch {
-        Write-SpectreHost "[bold red]An unexpected error occurred in Module Explorer: $($_.Exception.ToString() | Get-SpectreEscapedText)[/]"
+        Write-SpectreHost "[bold red]An unexpected error occurred in Module Explorer:
+            $($_.Exception.ToString() | Get-SpectreEscapedText)[/]"
         Read-SpectrePause -Message "[grey]Press Enter to acknowledge error and exit...[/]" -NoNewline
     }
     finally {
