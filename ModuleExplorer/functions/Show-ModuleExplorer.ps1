@@ -1,66 +1,66 @@
 ﻿<#
 .SYNOPSIS
-    Interactively explores available PowerShell modules and their commands.
+Interactively explores available PowerShell modules and their commands.
 
 .DESCRIPTION
-    The Show-ModuleExplorer cmdlet provides an interactive, terminal-based user interface
-    to browse through PowerShell modules installed or available on the system.
-    Users can select a module from the list to view its commands using the Show-ModuleCommandViewer function.
+The Show-ModuleExplorer cmdlet provides an interactive, terminal-based user interface
+to browse through PowerShell modules installed or available on the system.
+Users can select a module from the list to view its commands using the Show-ModuleCommandViewer function.
 
-    The interface displays "Module Explorer" as a title and lists all available modules.
-    You can filter the list of modules by providing a search string to the -Filter parameter.
-    The list also includes options to "Refresh List" and "<-- Exit" the explorer.
+The interface displays "Module Explorer" as a title and lists all available modules.
+You can filter the list of modules by providing a search string to the -Filter parameter.
+The list also includes options to "Refresh List" and "<-- Exit" the explorer.
 
-    This function utilizes PwshSpectreConsole cmdlets for a rich interactive experience.
+This function utilizes PwshSpectreConsole cmdlets for a rich interactive experience.
 
 .PARAMETER Filter
-    An optional string used to filter the list of displayed modules.
-    The function will search for modules whose names matches the filter string.
+An optional string used to filter the list of displayed modules.
+The function will search for modules whose names matches the filter string.
 
-    Type: String
-    Position: Named
-    Default value: None
-    Accept pipeline input: False
-    Accept wildcard characters: True
-
-.EXAMPLE
-    PS C:\> Show-ModuleExplorer
-
-    Description:
-    Launches the Module Explorer, displaying all available PowerShell modules.
-    You can then navigate and select a module to view its commands.
+Type: String
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: True
 
 .EXAMPLE
-    PS C:\> Show-ModuleExplorer -Filter "BurntToast"
+Get-Process C:\> Show-ModuleExplorer
 
-    Description:
-    Launches the Module Explorer and filters the initial list to show only modules
-    named "BurnToast".
+Description:
+Launches the Module Explorer, displaying all available PowerShell modules.
+You can then navigate and select a module to view its commands.
+
+.EXAMPLE
+Get-Process C:\> Show-ModuleExplorer -Filter "BurntToast"
+
+Description:
+Launches the Module Explorer and filters the initial list to show only modules
+named "BurnToast".
 
 .NOTES
-    This function depends on several cmdlets from a PowerShell module providing Spectre.Console integration
-    (e.g., Write-SpectreFigletText, Read-SpectreSelection, Write-SpectreHost, Write-SpectreRule, Read-SpectrePause, Get-SpectreEscapedText)
-    for its user interface. Ensure this module and its dependencies are installed and available.
+This function depends on several cmdlets from a PowerShell module providing Spectre.Console integration
+(e.g., Write-SpectreFigletText, Read-SpectreSelection, Write-SpectreHost, Write-SpectreRule, Read-SpectrePause, Get-SpectreEscapedText)
+for its user interface. Ensure this module and its dependencies are installed and available.
 
-    Upon selecting a module, this function calls `Show-ModuleCommandViewer` to display
-    the commands within that module.
+Upon selecting a module, this function calls `Show-ModuleCommandViewer` to display
+the commands within that module.
 
-    The explorer allows for refreshing the module list to reflect any changes (installs/uninstalls)
-    made while the explorer is running.
+The explorer allows for refreshing the module list to reflect any changes (installs/uninstalls)
+made while the explorer is running.
 
-    Navigation within the selection list is done using arrow keys and Enter.
-    The selection prompt also supports typing to filter the choices in real-time.
+Navigation within the selection list is done using arrow keys and Enter.
+The selection prompt also supports typing to filter the choices in real-time.
 
 .INPUTS
-    None
-    This function does not accept input from the pipeline.
+None
+This function does not accept input from the pipeline.
 
 .OUTPUTS
-    None
-    This function does not return any objects to the pipeline. It provides an interactive display in the console.
+None
+This function does not return any objects to the pipeline. It provides an interactive display in the console.
 
 .LINK
-    None
+None
 #>
 function Show-ModuleExplorer {
     [CmdletBinding()]
@@ -70,6 +70,7 @@ function Show-ModuleExplorer {
 
     try {
         $moduleLookup = @{} # Initialize hashtable to map display names to module objects
+        $minModulesForCategory = 10
 
         while ($true) {
             Clear-Host
@@ -78,7 +79,15 @@ function Show-ModuleExplorer {
             if ($Filter) {
                 $moduleQuery.Name = $Filter
             }
-            $availableModules = Get-Module @moduleQuery | Select-Object Name, Version, Path, ModuleBase, RootModule | Sort-Object Name
+            $availableModules = Get-Module @moduleQuery | Select-Object Name, Version, Path, ModuleBase, RootModule, @{Name = 'Prefix'; Expression = { ($_.Name -split '\.')[0] } }  | Sort-Object Name
+            $categories = $availableModules | Group-object Prefix | Where-object Count -ge $minModulesForCategory
+
+            if ($hideBigModules) {
+                $availableModules = $availableModules |
+                Where-Object { $_.Prefix -notin $categories.Name } |
+                Sort-Object Name
+            }
+
 
             if (-not $availableModules) {
                 Write-SpectreHost "[bold red]No PowerShell modules found.[/]"
@@ -88,14 +97,17 @@ function Show-ModuleExplorer {
 
             $exitChoiceString = "[cyan]<-- Exit[/]"
             $refreshChoiceString = "[cyan]Refresh List[/]"
+            $hideGroupedModulesString = "[grey]Toggle Grouped Modules[/]"
             # Reset the main loop if modules changes (install/remove)
             $moduleLookup.Clear()
-            $moduleChoices = @($exitChoiceString, $refreshChoiceString)
+            $moduleChoices = @($exitChoiceString, $refreshChoiceString, $hideGroupedModulesString)
 
             $processedDisplayNames = @{}
 
             foreach ($module in $availableModules) {
-                $versionString = if ($module.Version) { "v$($module.Version)"} else { "Version N/A" }
+
+                
+                $versionString = if ($module.Version) { "v$($module.Version)" } else { "Version N/A" }
                 $displayName = "$($module.Name) ($versionString)"
 
                 if (-not $processedDisplayNames.ContainsKey($displayName)) {
@@ -109,6 +121,7 @@ function Show-ModuleExplorer {
             Write-SpectreRule -Title "[grey] Installed Modules: $($availableModules.Count) [/]" -Alignment Center
             $selectedModuleDisplay = Read-SpectreSelection -Message $promptTitle -PageSize 15 -Choices $moduleChoices -EnableSearch
 
+
             if (-not $selectedModuleDisplay -or $selectedModuleDisplay -eq $exitChoiceString) {
                 Write-SpectreHost "[yellow]Exiting Module Explorer.[/]"
                 break
@@ -119,6 +132,19 @@ function Show-ModuleExplorer {
                 continue
             }
 
+            if ($selectedModuleDisplay -eq $hideGroupedModulesString) {
+                Write-SpectreHost "[italic green]Toggling the large modules...[/]"
+                if ($hideBigModules -eq $true) {
+                    Write-SpectreHost "[italic green]Showing the large modules...[/]"
+                    $hideBigModules = $false
+                }
+                else {
+                    $hideBigModules = $true
+                    Write-SpectreHost "[italic green]Hiding the large modules...[/]"
+                }
+                continue
+            }
+            
             # Use the lookup table
             $selectedModuleObject = $moduleLookup[$selectedModuleDisplay]
 
