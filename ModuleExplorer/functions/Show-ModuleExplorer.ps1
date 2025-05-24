@@ -79,18 +79,12 @@ function Show-ModuleExplorer {
                 $moduleQuery.Name = $Filter
             }
 
-            # Invoke-SpectreCommandWithStatus -ScriptBlock { $availableModules = Get-Module @moduleQuery |
-            #     Select-Object Name, Version, Path, ModuleBase, RootModule,
-            #     @{Name = 'Prefix'; Expression = { ($_.Name -split '\.')[0] } } |
-            #     Sort-Object Name
-            #     $availableModules
-            # } -Title "Loading PowerShell Modules..." -Spinner "Shark"
-
-            $availableModules = Get-Module @moduleQuery |
-                Select-Object Name, Version, Path, ModuleBase, RootModule,
-                @{Name = 'Prefix'; Expression = { ($_.Name -split '\.')[0] } } |
-                Sort-Object Name
-                $availableModul
+            $availableModules = Invoke-SpectreCommandWithStatus -ScriptBlock {
+                $modules = Get-Module @moduleQuery |
+                    Select-Object Name, Version, Path, ModuleBase, RootModule, @{Name = 'Prefix'; Expression = { ($_.Name -split '\.')[0] } } |
+                    Sort-Object Name
+                $modules
+            } -Title "Loading PowerShell Modules..." -Spinner "Shark"
 
             $categories = $availableModules |
                 Group-object Prefix |
@@ -156,8 +150,7 @@ function Show-ModuleExplorer {
                 if ($hideGroupedModules -eq $true) {
                     Write-SpectreHost "[italic green]Showing the large modules...[/]"
                     $hideGroupedModules = $false
-                }
-                else {
+                } else {
                     $hideGroupedModules = $true
                     Write-SpectreHost "[italic green]Hiding the large modules...[/]"
                 }
