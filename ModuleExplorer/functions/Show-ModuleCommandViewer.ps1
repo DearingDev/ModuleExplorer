@@ -42,7 +42,7 @@
 .NOTES
     This is a private function and is not intended to be called directly by users
     of the ModuleExplorer module. It is used internally to provide UI capabilities.
-    
+
     Requires the PwshSpectreConsole module to be available.
     The function attempts to dynamically adjust the displayed list sizes based on
     console window height. This works best when expanding the window; shrinking
@@ -104,7 +104,7 @@ function Show-ModuleCommandViewer {
     )
 
     $commands = Get-Command -Module $SelectedModule.Name | Sort-Object CommandType, Name
-    
+
     if (-not $commands) {
         Write-SpectreHost "[yellow]No exported commands found for module '$($SelectedModule.Name)'.[/]"
         Read-SpectrePause -Message "[grey]Press Enter to continue...[/]" -NoNewline
@@ -127,7 +127,7 @@ function Show-ModuleCommandViewer {
             Write-Verbose "Failed to get help for command '$($_.Name)': $($_.Exception.Message)"
             # Falls back to empty synopsis string
         }
-        
+
         [PSCustomObject]@{
             Name        = $_.Name
             Type        = $_.CommandType.ToString()
@@ -143,7 +143,7 @@ function Show-ModuleCommandViewer {
         Read-SpectrePause -Message "[grey]Press Enter to continue...[/]" -NoNewline
         return
     }
-    
+
     # Interactive Help Viewer with Invoke-SpectreLive
     # Ratios are king, not sure I can resize without them
     $initialCommandListContent = Write-SpectreHost "[grey]Loading command list...[/]" -PassThru | Format-SpectrePanel -Header "[bold]Commands[/]" -Expand -Border Rounded
@@ -162,13 +162,13 @@ function Show-ModuleCommandViewer {
         param (
             [Spectre.Console.LiveDisplayContext] $LiveContext
         )
-        
+
         # Set default variables for the live UI
         $currentCommandIndex = 0
         $currentHelpOptionIndex = 0
         $currentParameterIndex = 0
         $rightPaneView = 'Description'
-        
+
         $searchString = ""
         $filteredCommandObjects = $allCommandObjects
         $currentCommandObjectForHelp = $null
@@ -179,7 +179,7 @@ function Show-ModuleCommandViewer {
         $fixedRowsOverhead = 5 # Approximate rows for title, instructions, borders
         $dynamicPageSize = ($Host.UI.RawUI.WindowSize.Height - $fixedRowsOverhead)
         if ($dynamicPageSize -lt 1) {$dynamicPageSize = 1} # Ensure at least 1
-        
+
         $commandListPageSize = $dynamicPageSize
         $commandListScrollOffset = 0
 
@@ -187,7 +187,7 @@ function Show-ModuleCommandViewer {
         $currentHelpContentLines = @() # Stores text current help view
         $helpContentScrollOffset = 0
         $helpContentPageSize = $dynamicPageSize
-        
+
         $parameterListPageSize = $dynamicPageSize
         $parameterListScrollOffset = 0
 
@@ -204,7 +204,7 @@ function Show-ModuleCommandViewer {
                     $commandListPageSize = $dynamicPageSize
                     $helpContentPageSize = $dynamicPageSize
                     $parameterListPageSize = $dynamicPageSize
-                    
+
                     # Re-clamp scroll offsets
                     $commandListTotalItemsForClamp = $filteredCommandObjects.Count
                     if ($commandListTotalItemsForClamp -gt 0) {
@@ -216,12 +216,12 @@ function Show-ModuleCommandViewer {
                     if ($commandParametersForHelp.Count -gt 0 -and $rightPaneView -eq 'ParameterList') {
                         $parameterListScrollOffset = [System.Math]::Min($parameterListScrollOffset, [System.Math]::Max(0, $commandParametersForHelp.Count - $parameterListPageSize))
                     } else {
-                        $commandListScrollOffset = 0
+                        $parameterListScrollOffset = 0
                     }
                     if ($currentHelpContentLines.Count -gt 0) {
                         $helpContentScrollOffset = [System.Math]::Min($helpContentScrollOffset, [System.Math]::Max(0, $currentHelpContentLines.Count - $helpContentPageSize))
                     } else {
-                        $commandListScrollOffset = 0
+                        $helpContentScrollOffset = 0
                     }
                 }
 
@@ -230,24 +230,29 @@ function Show-ModuleCommandViewer {
                     $filteredCommandObjects = $allCommandObjects | Where-Object { $_.Name -like "*$searchString*" }
                     # Adjust current index and scroll if filter changes
                     if ($currentCommandIndex -ge $filteredCommandObjects.Count -and $filteredCommandObjects.Count -gt 0) {
-                        $currentCommandIndex = $filteredCommandObjects.Count - 1  # Select last item
+                        $currentCommandIndex = $filteredCommandObjects.Count - 1
                     } elseif ($filteredCommandObjects.Count -eq 0) {
                         $currentCommandIndex = -1
                     }
-                    if ($currentCommandIndex -eq -1 -or $currentCommandIndex -lt $commandListScrollOffset -or $currentCommandIndex -ge ($commandListScrollOffset + $commandListPageSize)) {
+                    # Adjust scroll to keep selected item in view after filtering
+                    if ($currentCommandIndex -ne -1 -and ($currentCommandIndex -lt $commandListScrollOffset -or $currentCommandIndex -ge ($commandListScrollOffset + $commandListPageSize))) {
                         $commandListScrollOffset = [System.Math]::Max(0, $currentCommandIndex - [System.Math]::Floor($commandListPageSize / 2))
-                        if ($commandListTotalItems -gt 0) {
-                            $commandListScrollOffset = [System.Math]::Min($commandListScrollOffset, [System.Math]::Max(0, $commandListTotalItems - $commandListPageSize))
-                        } else {
-                            $commandListScrollOffset = 0
-                        }
+                    } elseif ($currentCommandIndex -eq -1) {
+                        $commandListScrollOffset = 0 # No items, so scroll to top
+                    }
+                    # Clamp scroll offset again after adjustment
+                    $commandListTotalItemsForClampOnSearch = $filteredCommandObjects.Count
+                    if ($commandListTotalItemsForClampOnSearch -gt 0) {
+                        $commandListScrollOffset = [System.Math]::Min($commandListScrollOffset, [System.Math]::Max(0, $commandListTotalItemsForClampOnSearch - $commandListPageSize))
+                    } else {
+                        $commandListScrollOffset = 0
                     }
                 } else {
                     $filteredCommandObjects = $allCommandObjects
                 }
                 $commandListTotalItems = $filteredCommandObjects.Count
 
-                # Ensure currentCommandIndex is valid
+                # Ensure currentCommandIndex is valid after filtering or list change
                 if ($commandListTotalItems -eq 0) {
                     $currentCommandIndex = -1
                     $commandListScrollOffset = 0
@@ -259,7 +264,7 @@ function Show-ModuleCommandViewer {
 
                 # Command List Panel (Left Pane)
                 $listItems = New-Object System.Collections.Generic.List[string]
-                $commandListPanelHeader = "[bold]($($commandListTotalItems) total)[/]"
+                $commandListPanelHeader = "[bold]Commands ($($commandListTotalItems) total)[/]" # Simplified header
                 if ($searchString -ne "") {
                     $commandListPanelHeader += " Filter: [yellow]'$($searchString)'[/]"
                 }
@@ -271,7 +276,7 @@ function Show-ModuleCommandViewer {
                     $visibleListEndIndex = [System.Math]::Min(($commandListScrollOffset + $commandListPageSize - 1), ($commandListTotalItems - 1))
 
                     for ($i = $visibleListStartIndex; $i -le $visibleListEndIndex; $i++) {
-                        if ($i -lt 0 -or $i -ge $filteredCommandObjects.Count) { continue }
+                        if ($i -lt 0 -or $i -ge $filteredCommandObjects.Count) { continue } # Boundary check
                         $cmd = $filteredCommandObjects[$i]
                         $displayName = $cmd.Name
                         $styledName = switch ($cmd.Type) {
@@ -280,19 +285,19 @@ function Show-ModuleCommandViewer {
                             'Alias'    { "[magenta]$displayName[/]" }
                             default    { $displayName }
                         }
-                        if ($i -eq $currentCommandIndex) { $listItems.Add("[yellow bold]>[/] $($styledName)") } # Highlight selected
+                        if ($i -eq $currentCommandIndex) { $listItems.Add("[yellow bold]>[/] $($styledName)") }
                         else { $listItems.Add("  $($styledName)") }
                     }
                     if ($visibleListEndIndex -lt ($commandListTotalItems - 1)) { $listItems.Add("[grey]  ↓ ...[/]")}
                 } else {
                     $listItems.Add("[grey] (No commands to display) [/]")
                 }
-            
+
                 $commandListPanel = $listItems | Format-SpectreRows | Format-SpectrePanel -Header $commandListPanelHeader -Expand -Border Rounded
                 $layout["commandListPane"].Update($commandListPanel) | Out-Null
-                
 
-                # Right Pane for Command View (Description, Help Options, or Help Content)
+
+                # Right Pane for Command View (Description, Help Options, ParameterList, or Help Content)
                 $rightPanelContentRenderable = $null
                 $rightPanelHeader = "[bold]Info[/]"
 
@@ -305,7 +310,7 @@ function Show-ModuleCommandViewer {
                             $currentCmdForDesc.Synopsis
                         } elseif ($currentCmdForDesc.Type -eq 'Alias' -and $currentCmdForDesc.Definition) {
                             "Alias for: $($currentCmdForDesc.Definition)"
-                        } else { "No synopsis available." }
+                        } else { "[grey]No synopsis available.[/]" }
                         $rightPanelContentRenderable = ($descriptionText | Get-SpectreEscapedText | Format-SpectrePanel -Header $rightPanelHeader -Expand -Border Rounded)
                     } else {
                         $rightPanelContentRenderable = (Write-SpectreHost "[grey]No command selected or found.[/]" -PassThru | Format-SpectrePanel -Header $rightPanelHeader -Expand -Border Rounded)
@@ -317,13 +322,13 @@ function Show-ModuleCommandViewer {
                         else { "  $($helpOptions[$i])" }
                     }
                     $rightPanelContentRenderable = ($helpOptionListItems | Format-SpectreRows | Format-SpectrePanel -Header $rightPanelHeader -Expand -Border Rounded)
-                
+
                 } elseif ($rightPaneView -eq 'ParameterList') {
                     $rightPanelHeader = "[bold]Parameters for $($currentCommandObjectForHelp.Name)[/]"
                     $paramListItems = New-Object System.Collections.Generic.List[string]
                     if ($commandParametersForHelp.Count -gt 0) {
                         if ($parameterListScrollOffset -gt 0) { $paramListItems.Add("[grey]  ↑ ...[/]")}
-                        
+
                         $visibleParamListStartIndex = $parameterListScrollOffset
                         $visibleParamListEndIndex = [System.Math]::Min(($parameterListScrollOffset + $parameterListPageSize - 1), ($commandParametersForHelp.Count - 1))
 
@@ -331,11 +336,12 @@ function Show-ModuleCommandViewer {
                             if ($p -lt 0 -or $p -ge $commandParametersForHelp.Count) { continue }
                             $paramMetadata = $commandParametersForHelp[$p]
                             $paramName = $paramMetadata.Name
-                            $styledParamName = if ($commonParameterNames -contains $paramName) { # Style common parameters
+                            $styledParamName = if ($commonParameterNames -contains $paramName) {
                                 "[grey]$paramName[/]"
                             } else {
                                 $paramName
                             }
+                            # Use $currentParameterIndex for highlighting in this view
                             if ($p -eq $currentParameterIndex) { $paramListItems.Add("[yellow bold]>[/] $($styledParamName)") }
                             else { $paramListItems.Add("  $($styledParamName)") }
                         }
@@ -352,12 +358,12 @@ function Show-ModuleCommandViewer {
                     } else { # HelpContent
                         $rightPanelHeader = "[bold]Help: $($currentCommandObjectForHelp.Name) - $($helpOptions[$currentHelpOptionIndex])[/]"
                     }
-                    
+
                     # Display scrolled content
                     $visibleHelpLines = New-Object System.Collections.Generic.List[string]
                     if ($currentHelpContentLines.Count -gt 0) {
                         if ($helpContentScrollOffset -gt 0) { $visibleHelpLines.Add("[grey]  ↑ ...[/]")}
-                        
+
                         $helpViewEndIndex = [System.Math]::Min(($helpContentScrollOffset + $helpContentPageSize - 1), ($currentHelpContentLines.Count - 1))
                         for ($l = $helpContentScrollOffset; $l -le $helpViewEndIndex; $l++) {
                             if ($l -ge 0 -and $l -lt $currentHelpContentLines.Count) {
@@ -367,19 +373,19 @@ function Show-ModuleCommandViewer {
 
                         if ($helpViewEndIndex -lt ($currentHelpContentLines.Count - 1)) { $visibleHelpLines.Add("[grey]  ↓ ...[/]")}
                     } else {
-                        $visibleHelpLines.Add($currentHelpContent)
+                        $visibleHelpLines.Add("[grey](No help content available for this view)[/]")
                     }
                     $rightPanelContentRenderable = ($visibleHelpLines | Format-SpectreRows | Format-SpectrePanel -Header $rightPanelHeader -Expand -Border Rounded)
                 }
-                
+
                 $layout["rightPane"].Update($rightPanelContentRenderable) | Out-Null
-            
+
                 $LiveContext.Refresh()
 
                 # Input handling
                 if (-not [Console]::KeyAvailable) { Start-Sleep -Milliseconds 50; continue }
                 $keyInfo = [Console]::ReadKey($true)
-                
+
                 if ($keyInfo.Key -eq [System.ConsoleKey]::Escape) { return $null }
 
                 # Type to Search but only when in Description view
@@ -393,7 +399,7 @@ function Show-ModuleCommandViewer {
                     $commandListScrollOffset = 0
                     continue # Re-render with new search
                 }
-                
+
                 # More Input Handling!
                 if ($rightPaneView -eq 'Description') {
                     switch ($keyInfo.Key) {
@@ -456,24 +462,36 @@ function Show-ModuleCommandViewer {
                         }
                         ([System.ConsoleKey]::RightArrow) {
                             $selectedHelpType = $helpOptions[$currentHelpOptionIndex]
-                            $currentHelpContentLines = @("[grey]Fetching help...[/]") # Placeholder
+                            $currentHelpContentLines = @("[grey]Fetching help...[/]")
                             $helpContentScrollOffset = 0
-                            
-                            if ($selectedHelpType -eq "Parameters") { # Handle "Parameters" selection
-                                $allParams = $currentCommandObjectForHelp.CommandInfo.Parameters.Values
-                                $nonCommonParams = $allParams | Where-Object { $commonParameterNames -notcontains $_.Name } | Sort-Object Name
-                                $commonParamsFromCmd = $allParams | Where-Object { $commonParameterNames -contains $_.Name } | Sort-Object Name
-                                $commandParametersForHelp = $nonCommonParams + $commonParamsFromCmd # Non-common first
 
+                            if ($selectedHelpType -eq "Parameters") {
+                                $allParamsCollection = $currentCommandObjectForHelp.CommandInfo.Parameters.Values
+                                $tempParameterList = New-Object System.Collections.Generic.List[System.Management.Automation.ParameterMetadata]
+
+                                $nonCommonParamsOutput = [System.Management.Automation.ParameterMetadata[]](
+                                    $allParamsCollection | Where-Object { $commonParameterNames -notcontains $_.Name } | Sort-Object Name
+                                )
+                                if ($nonCommonParamsOutput) {
+                                    $tempParameterList.AddRange($nonCommonParamsOutput)
+                                }
+
+                                $commonParamsFromCmdOutput = [System.Management.Automation.ParameterMetadata[]](
+                                    $allParamsCollection | Where-Object { $commonParameterNames -contains $_.Name } | Sort-Object Name
+                                )
+                                if ($commonParamsFromCmdOutput) {
+                                    $tempParameterList.AddRange($commonParamsFromCmdOutput)
+                                }
+                                $commandParametersForHelp = $tempParameterList.ToArray()
                                 $currentParameterIndex = 0
                                 $parameterListScrollOffset = 0
                                 $rightPaneView = 'ParameterList'
                             } elseif ($selectedHelpType -eq "Online") {
                                 $currentHelpContentLines = @("[yellow]Press Right Arrow or Enter to open online help (if available), or Left Arrow to go back.[/]")
                                 $rightPaneView = 'HelpContent'
-                            } else { # For Examples, Detailed, Full
+                            } else {
                                 $rightPaneView = 'HelpContent'
-                                $LiveContext.Refresh() # Show "Fetching help..."
+                                $LiveContext.Refresh()
                                 try {
                                     $helpText = ""
                                     switch($selectedHelpType) {
@@ -499,13 +517,25 @@ function Show-ModuleCommandViewer {
                             $selectedHelpType = $helpOptions[$currentHelpOptionIndex]
                             $currentHelpContentLines = @("[grey]Fetching help...[/]")
                             $helpContentScrollOffset = 0
-                            
-                            if ($selectedHelpType -eq "Parameters") {
-                                $allParams = $currentCommandObjectForHelp.CommandInfo.Parameters.Values
-                                $nonCommonParams = $allParams | Where-Object { $commonParameterNames -notcontains $_.Name } | Sort-Object Name
-                                $commonParamsFromCmd = $allParams | Where-Object { $commonParameterNames -contains $_.Name } | Sort-Object Name
-                                $commandParametersForHelp = $nonCommonParams + $commonParamsFromCmd
 
+                            if ($selectedHelpType -eq "Parameters") {
+                                $allParamsCollection = $currentCommandObjectForHelp.CommandInfo.Parameters.Values
+                                $tempParameterList = New-Object System.Collections.Generic.List[System.Management.Automation.ParameterMetadata]
+
+                                $nonCommonParamsOutput = [System.Management.Automation.ParameterMetadata[]](
+                                    $allParamsCollection | Where-Object { $commonParameterNames -notcontains $_.Name } | Sort-Object Name
+                                )
+                                if ($nonCommonParamsOutput) {
+                                    $tempParameterList.AddRange($nonCommonParamsOutput)
+                                }
+
+                                $commonParamsFromCmdOutput = [System.Management.Automation.ParameterMetadata[]](
+                                    $allParamsCollection | Where-Object { $commonParameterNames -contains $_.Name } | Sort-Object Name
+                                )
+                                if ($commonParamsFromCmdOutput) {
+                                    $tempParameterList.AddRange($commonParamsFromCmdOutput)
+                                }
+                                $commandParametersForHelp = $tempParameterList.ToArray()
                                 $currentParameterIndex = 0
                                 $parameterListScrollOffset = 0
                                 $rightPaneView = 'ParameterList'
