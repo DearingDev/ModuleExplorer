@@ -191,12 +191,17 @@ function Show-ModuleCommandViewer {
         $parameterListPageSize = $dynamicPageSize
         $parameterListScrollOffset = 0
 
+        $maxNameLength = 30 # Default/initial max name length
+
         try {
             while ($true) {
                 # Recalculate dynamic page sizes if console was resized
                 # This doesn't work when shrinking the console, but it does when expanding
                 # Will need to revisit to see if I can resolve that issue.
-                $newDynamicPageSize = ($Host.UI.RawUI.WindowSize.Height - $fixedRowsOverhead)
+                $consoleHeight = $Host.UI.RawUI.WindowSize.Height
+                $consoleWidth = $Host.UI.RawUI.WindowSize.Width
+
+                $newDynamicPageSize = ($consoleHeight - $fixedRowsOverhead)
                 if ($newDynamicPageSize -lt 1) {$newDynamicPageSize = 1}
 
                 if ($newDynamicPageSize -ne $dynamicPageSize) {
@@ -209,21 +214,35 @@ function Show-ModuleCommandViewer {
                     $commandListTotalItemsForClamp = $filteredCommandObjects.Count
                     if ($commandListTotalItemsForClamp -gt 0) {
                         $commandListScrollOffset = [System.Math]::Min($commandListScrollOffset, [System.Math]::Max(0, $commandListTotalItemsForClamp - $commandListPageSize))
-                    } else {
-                        $commandListScrollOffset = 0
-                    }
+                    } else { $commandListScrollOffset = 0 }
 
                     if ($commandParametersForHelp.Count -gt 0 -and $rightPaneView -eq 'ParameterList') {
                         $parameterListScrollOffset = [System.Math]::Min($parameterListScrollOffset, [System.Math]::Max(0, $commandParametersForHelp.Count - $parameterListPageSize))
-                    } else {
-                        $parameterListScrollOffset = 0
-                    }
+                    } else { $parameterListScrollOffset = 0 }
+
                     if ($currentHelpContentLines.Count -gt 0) {
                         $helpContentScrollOffset = [System.Math]::Min($helpContentScrollOffset, [System.Math]::Max(0, $currentHelpContentLines.Count - $helpContentPageSize))
-                    } else {
-                        $helpContentScrollOffset = 0
-                    }
+                    } else { $helpContentScrollOffset = 0 }
                 }
+
+                # Calculate dynamic maxNameLength for command list truncation
+                $_commandListPaneLayoutRatio = $commandListPaneLayout.Ratio
+                $_rightPaneLayoutRatio = $rightPaneLayout.Ratio
+                $_totalColumnRatiosInCombinedPanel = $_commandListPaneLayoutRatio + $_rightPaneLayoutRatio
+
+                if ($_totalColumnRatiosInCombinedPanel -gt 0) {
+                    $commandListPaneNominalWidth = [Math]::Floor($consoleWidth * ($_commandListPaneLayoutRatio / $_totalColumnRatiosInCombinedPanel))
+                } else {
+                    # Fallback if ratios are zero or not found, though they should be 1 and 3.
+                    $commandListPaneNominalWidth = [Math]::Floor($consoleWidth / 4) # Default to 1/4 if ratios are problematic
+                }
+
+                $panelHorizontalOverhead = 4
+                $maxContentWidthInPanel = $commandListPaneNominalWidth - $panelHorizontalOverhead
+                $prefixCharsLength = 2
+                $currentMaxNameLength = $maxContentWidthInPanel - $prefixCharsLength
+                if ($currentMaxNameLength -lt 10) {$currentMaxNameLength = 10}
+                $maxNameLength = $currentMaxNameLength
 
                 # Filter command list based on search string
                 if ($searchString -ne "") {
@@ -231,22 +250,16 @@ function Show-ModuleCommandViewer {
                     # Adjust current index and scroll if filter changes
                     if ($currentCommandIndex -ge $filteredCommandObjects.Count -and $filteredCommandObjects.Count -gt 0) {
                         $currentCommandIndex = $filteredCommandObjects.Count - 1
-                    } elseif ($filteredCommandObjects.Count -eq 0) {
-                        $currentCommandIndex = -1
-                    }
-                    # Adjust scroll to keep selected item in view after filtering
+                    } elseif ($filteredCommandObjects.Count -eq 0) { $currentCommandIndex = -1 }
+
                     if ($currentCommandIndex -ne -1 -and ($currentCommandIndex -lt $commandListScrollOffset -or $currentCommandIndex -ge ($commandListScrollOffset + $commandListPageSize))) {
                         $commandListScrollOffset = [System.Math]::Max(0, $currentCommandIndex - [System.Math]::Floor($commandListPageSize / 2))
-                    } elseif ($currentCommandIndex -eq -1) {
-                        $commandListScrollOffset = 0 # No items, so scroll to top
-                    }
-                    # Clamp scroll offset again after adjustment
+                    } elseif ($currentCommandIndex -eq -1) { $commandListScrollOffset = 0 }
+
                     $commandListTotalItemsForClampOnSearch = $filteredCommandObjects.Count
                     if ($commandListTotalItemsForClampOnSearch -gt 0) {
                         $commandListScrollOffset = [System.Math]::Min($commandListScrollOffset, [System.Math]::Max(0, $commandListTotalItemsForClampOnSearch - $commandListPageSize))
-                    } else {
-                        $commandListScrollOffset = 0
-                    }
+                    } else { $commandListScrollOffset = 0 }
                 } else {
                     $filteredCommandObjects = $allCommandObjects
                 }
@@ -264,7 +277,7 @@ function Show-ModuleCommandViewer {
 
                 # Command List Panel (Left Pane)
                 $listItems = New-Object System.Collections.Generic.List[string]
-                $commandListPanelHeader = "[bold]Commands ($($commandListTotalItems) total)[/]" # Simplified header
+                $commandListPanelHeader = "[bold]($($commandListTotalItems) total)[/]"
                 if ($searchString -ne "") {
                     $commandListPanelHeader += " Filter: [yellow]'$($searchString)'[/]"
                 }
@@ -278,12 +291,23 @@ function Show-ModuleCommandViewer {
                     for ($i = $visibleListStartIndex; $i -le $visibleListEndIndex; $i++) {
                         if ($i -lt 0 -or $i -ge $filteredCommandObjects.Count) { continue } # Boundary check
                         $cmd = $filteredCommandObjects[$i]
-                        $displayName = $cmd.Name
+
+                        $originalDisplayName = $cmd.Name
+                        $processedDisplayName = $originalDisplayName
+
+                        if ($originalDisplayName.Length -gt $maxNameLength) {
+                            if ($maxNameLength -ge 3) {
+                                $processedDisplayName = $originalDisplayName.Substring(0, [Math]::Max(0, $maxNameLength - 3)) + "..."
+                            } else {
+                                $processedDisplayName = $originalDisplayName.Substring(0, [Math]::Max(0, $maxNameLength))
+                            }
+                        }
+
                         $styledName = switch ($cmd.Type) {
-                            'Cmdlet'   { "[green]$displayName[/]" }
-                            'Function' { "[blue]$displayName[/]" }
-                            'Alias'    { "[magenta]$displayName[/]" }
-                            default    { $displayName }
+                            'Cmdlet'   { "[green]$processedDisplayName[/]" }
+                            'Function' { "[blue]$processedDisplayName[/]" }
+                            'Alias'    { "[magenta]$processedDisplayName[/]" }
+                            default    { $processedDisplayName }
                         }
                         if ($i -eq $currentCommandIndex) { $listItems.Add("[yellow bold]>[/] $($styledName)") }
                         else { $listItems.Add("  $($styledName)") }
@@ -432,9 +456,7 @@ function Show-ModuleCommandViewer {
                                 $searchString = $searchString.Substring(0, $searchString.Length - 1)
                                 $currentCommandIndex = 0
                                 $commandListScrollOffset = 0
-                            } else {
-                                return $null
-                            }
+                            } else { return $null }
                         }
                         ([System.ConsoleKey]::Backspace) {
                             if ($searchString.Length -gt 0) {
