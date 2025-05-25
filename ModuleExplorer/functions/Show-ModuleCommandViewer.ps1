@@ -151,11 +151,11 @@ function Show-ModuleCommandViewer {
 
     $commandListPaneLayout = New-SpectreLayout -Name "commandListPane" -Data $initialCommandListContent -Ratio 1
     $rightPaneLayout = New-SpectreLayout -Name "rightPane" -Data $initialRightPanelContent -Ratio 3
-    $combinedPanel = New-SpectreLayout -Name "combinedPanel" -Columns @($commandListPaneLayout , $rightPaneLayout) -Ratio 10
+    $combinedPanel = New-SpectreLayout -Name "combinedPanel" -Columns @($commandListPaneLayout , $rightPaneLayout) -Ratio 20
 
-    $titleRenderable = Write-SpectreHost "`n[green bold]Cmdlets[/], [blue bold]Functions[/], and [magenta bold]Aliases[/] in $($SelectedModule.Name)" -PassThru | Format-SpectrePadded -Top 0 -Right 0 -Bottom 0 -Left 1
+    $titleRenderable = Write-SpectreHost "[green bold]Cmdlets[/], [blue bold]Functions[/], and [magenta bold]Aliases[/] in $($SelectedModule.Name)" -PassThru | Format-SpectreAligned -HorizontalAlignment Center
     $instructionsText = "[grey](↑/↓ Navigate | → Select | ← Back | Type to Search | Esc Exit)[/]"
-    $instructionsRenderable = Write-SpectreHost $instructionsText -PassThru | Format-SpectrePadded -Top 1 -Right 0 -Bottom 0 -Left 0 | Format-SpectreAligned -HorizontalAlignment Center
+    $instructionsRenderable = Write-SpectreHost $instructionsText -PassThru | Format-SpectreAligned -HorizontalAlignment Center
     $layout = New-SpectreLayout -Name "root" -Rows @($titleRenderable, $combinedPanel, $instructionsRenderable)
 
     Invoke-SpectreLive -Data $layout -ScriptBlock {
@@ -176,7 +176,7 @@ function Show-ModuleCommandViewer {
         $commandParametersForHelp = @() # Holds Parameter objects, sorted with common params last
 
         # Dynamic sizing based on console height
-        $fixedRowsOverhead = 5 # Approximate rows for title, instructions, borders
+        $fixedRowsOverhead = 4 # Approximate rows for title, instructions, borders
         $dynamicPageSize = ($Host.UI.RawUI.WindowSize.Height - $fixedRowsOverhead)
         if ($dynamicPageSize -lt 1) {$dynamicPageSize = 1} # Ensure at least 1
 
@@ -286,7 +286,7 @@ function Show-ModuleCommandViewer {
                     if ($commandListScrollOffset -gt 0) { $listItems.Add("[grey]  ↑ ...[/]")}
 
                     $visibleListStartIndex = $commandListScrollOffset
-                    $visibleListEndIndex = [System.Math]::Min(($commandListScrollOffset + $commandListPageSize - 1), ($commandListTotalItems - 1))
+                    $visibleListEndIndex = [System.Math]::Min(($commandListScrollOffset + $commandListPageSize - 3), ($commandListTotalItems - 1))
 
                     for ($i = $visibleListStartIndex; $i -le $visibleListEndIndex; $i++) {
                         if ($i -lt 0 -or $i -ge $filteredCommandObjects.Count) { continue } # Boundary check
@@ -438,7 +438,7 @@ function Show-ModuleCommandViewer {
                         ([System.ConsoleKey]::DownArrow) {
                             if ($commandListTotalItems -gt 0 -and $currentCommandIndex -lt ($commandListTotalItems - 1)) {
                                 $currentCommandIndex++
-                                if ($currentCommandIndex -ge ($commandListScrollOffset + $commandListPageSize)) {
+                                if ($currentCommandIndex -ge ($commandListScrollOffset + $commandListPageSize - 2)) { # -2 to offset to account for the scroll indicators
                                     $commandListScrollOffset++ # Scroll down one line
                                 }
                             }
