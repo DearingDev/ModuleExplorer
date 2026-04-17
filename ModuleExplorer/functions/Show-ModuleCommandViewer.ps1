@@ -93,45 +93,19 @@
 function Show-ModuleCommandViewer {
     param (
         [Parameter(Mandatory)]
-        [PSObject]$SelectedModule
+        [PSObject]$SelectedModule,
+
+        [hashtable]$DataProvider
     )
 
-    $commands = Get-Command -Module $SelectedModule.Name | Sort-Object CommandType, Name
-
-    if (-not $commands) {
-        Write-SpectreHost "[yellow]No exported commands found for module '$($SelectedModule.Name)'.[/]"
-        Read-SpectrePause -Message "[grey]Press Enter to continue...[/]" -NoNewline
-        return
+    if (-not $DataProvider) {
+        $DataProvider = New-ModuleDataProvider -ModuleName $SelectedModule.Name
     }
 
-    # Pre-fetch command details including synopsis
-    $allCommandObjects = @($commands | ForEach-Object {
-        $synopsis = ""
-        try {
-            $helpInfo = Get-Help $_.Name -ErrorAction SilentlyContinue
-            if ($helpInfo) {
-                if ($helpInfo.Synopsis -is [array]) {
-                    $synopsis = ($helpInfo.Synopsis | Select-Object -First 1) -join " "
-                } elseif ($helpInfo.Synopsis) {
-                    $synopsis = $helpInfo.Synopsis
-                }
-            }
-        } catch {
-            Write-Verbose "Failed to get help for command '$($_.Name)': $($_.Exception.Message)"
-        }
-
-        [PSCustomObject]@{
-            Name        = $_.Name
-            Type        = $_.CommandType.ToString()
-            Source      = $_.Source
-            Definition  = $_.Definition
-            Synopsis    = $synopsis
-            CommandInfo = $_
-        }
-    })
+    $allCommandObjects = @(& $DataProvider.GetItems)
 
     if (-not $allCommandObjects) {
-        Write-SpectreHost "[yellow]Could not retrieve command details for '$($SelectedModule.Name)'.[/]"
+        Write-SpectreHost "[yellow]No commands found for '$($SelectedModule.Name)'.[/]"
         Read-SpectrePause -Message "[grey]Press Enter to continue...[/]" -NoNewline
         return
     }
@@ -166,7 +140,7 @@ function Show-ModuleCommandViewer {
         SearchString              = ''
         MaxNameLength             = $cfg.Layout.MinNameLength
         HelpOptionIndex           = 0
-        HelpOptions               = $cfg.HelpOptions
+        HelpOptions               = @(& $DataProvider.GetDetailOptions $null)
         Parameters                = @()
         ParameterIndex            = 0
         ParameterListScrollOffset = 0
@@ -177,6 +151,7 @@ function Show-ModuleCommandViewer {
         HelpContentScrollOffset   = 0
         HelpContentPageSize       = $dynamicPageSize
         LiveContext               = $null
+        DataProvider              = $DataProvider
     }
 
     Invoke-SpectreLive -Data $layout -ScriptBlock {

@@ -71,6 +71,7 @@ function Invoke-ViewerInputHandler {
                 ([System.ConsoleKey]::RightArrow) {
                     if ($State.CommandIndex -ge 0 -and $State.CommandIndex -lt $State.FilteredCommands.Count) {
                         $State.CurrentCommand = $State.FilteredCommands[$State.CommandIndex]
+                        $State.HelpOptions = @(& $State.DataProvider.GetDetailOptions $State.CurrentCommand)
                         $State.View = 'HelpOptions'
                         $State.HelpOptionIndex = 0
                         $State.SearchString = ''
@@ -79,6 +80,7 @@ function Invoke-ViewerInputHandler {
                 ([System.ConsoleKey]::Enter) {
                     if ($State.CommandIndex -ge 0 -and $State.CommandIndex -lt $State.FilteredCommands.Count) {
                         $State.CurrentCommand = $State.FilteredCommands[$State.CommandIndex]
+                        $State.HelpOptions = @(& $State.DataProvider.GetDetailOptions $State.CurrentCommand)
                         $State.View = 'HelpOptions'
                         $State.HelpOptionIndex = 0
                         $State.SearchString = ''
@@ -159,13 +161,13 @@ function Invoke-ViewerInputHandler {
                 }
                 ([System.ConsoleKey]::RightArrow) {
                     if ($State.HelpOptions[$State.HelpOptionIndex] -eq 'Online') {
-                        try   { Get-Help $State.CurrentCommand.CommandInfo -Online }
+                        try   { & $State.DataProvider.OpenOnlineHelp $State.CurrentCommand }
                         catch { $State.HelpContentLines = @('[red]Could not retrieve online help. Press Left to go back.[/]') }
                     }
                 }
                 ([System.ConsoleKey]::Enter) {
                     if ($State.HelpOptions[$State.HelpOptionIndex] -eq 'Online') {
-                        try   { Get-Help $State.CurrentCommand.CommandInfo -Online }
+                        try   { & $State.DataProvider.OpenOnlineHelp $State.CurrentCommand }
                         catch { $State.HelpContentLines = @('[red]Could not retrieve online help. Press Left to go back.[/]') }
                     }
                 }
@@ -191,14 +193,14 @@ function Invoke-ViewerHelpOptionSelect {
     $State.HelpContentScrollOffset = 0
 
     if ($selectedHelpType -eq 'Parameters') {
-        $State.Parameters = Get-SortedParameterList -Parameters $State.CurrentCommand.CommandInfo.Parameters.Values
+        $State.Parameters = @(& $State.DataProvider.GetChildren $State.CurrentCommand 'Parameters')
         $State.ParameterIndex = 0
         $State.ParameterListScrollOffset = 0
         $State.View = 'ParameterList'
     } else {
         $State.View = 'HelpContent'
         $State.LiveContext.Refresh()
-        $State.HelpContentLines = Get-CommandHelpContent -HelpType $selectedHelpType -CommandInfo $State.CurrentCommand.CommandInfo
+        $State.HelpContentLines = @(& $State.DataProvider.GetDetailContent $State.CurrentCommand $selectedHelpType)
     }
 }
 
@@ -213,9 +215,6 @@ function Invoke-ViewerParameterSelect {
         $State.HelpContentScrollOffset = 0
         $State.View = 'ParameterHelpContent'
         $State.LiveContext.Refresh()
-        $State.HelpContentLines = Get-ParameterHelpContent `
-            -CommandName         $State.CurrentCommand.Name `
-            -ParameterName       $State.CurrentParameter.Name `
-            -FallbackHelpMessage $State.CurrentParameter.HelpMessage
+        $State.HelpContentLines = @(& $State.DataProvider.GetChildContent $State.CurrentCommand $State.CurrentParameter)
     }
 }

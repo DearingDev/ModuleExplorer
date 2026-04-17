@@ -169,7 +169,8 @@ function Show-ModuleExplorer {
             }
 
             Clear-Host
-            Show-ModuleCommandViewer -SelectedModule $selectedModuleObject
+            $provider = New-ModuleDataProvider -ModuleName $selectedModuleObject.Name
+            Show-ModuleCommandViewer -SelectedModule $selectedModuleObject -DataProvider $provider
         } # End of main loop
     }
     catch {
