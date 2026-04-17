@@ -193,6 +193,180 @@ function Show-ModuleCommandViewer {
 
         $maxNameLength = 30 # Default/initial max name length
 
+        # --- Input Handling ScriptBlocks ---
+        $handleDescriptionInput = {
+            switch ($keyInfo.Key) {
+                ([System.ConsoleKey]::UpArrow) {
+                    if ($currentCommandIndex -gt 0) {
+                        $currentCommandIndex--
+                        if ($currentCommandIndex -lt $commandListScrollOffset) {
+                            $commandListScrollOffset = $currentCommandIndex # Snap to top
+                        }
+                    }
+                }
+                ([System.ConsoleKey]::DownArrow) {
+                    if ($commandListTotalItems -gt 0 -and $currentCommandIndex -lt ($commandListTotalItems - 1)) {
+                        $currentCommandIndex++
+                        if ($currentCommandIndex -ge ($commandListScrollOffset + $commandListPageSize - 2)) { # -2 to offset to account for the scroll indicators
+                            $commandListScrollOffset++ # Scroll down one line
+                        }
+                    }
+                }
+                ([System.ConsoleKey]::RightArrow) {
+                    if ($currentCommandIndex -ge 0 -and $currentCommandIndex -lt $filteredCommandObjects.Count) {
+                        $currentCommandObjectForHelp = $filteredCommandObjects[$currentCommandIndex]
+                        $rightPaneView = 'HelpOptions'
+                        $currentHelpOptionIndex = 0
+                        $searchString = "" # Clear search when moving to help
+                    }
+                }
+                ([System.ConsoleKey]::Enter) {
+                    if ($currentCommandIndex -ge 0 -and $currentCommandIndex -lt $filteredCommandObjects.Count) {
+                        $currentCommandObjectForHelp = $filteredCommandObjects[$currentCommandIndex]
+                        $rightPaneView = 'HelpOptions'
+                        $currentHelpOptionIndex = 0
+                        $searchString = ""
+                    }
+                }
+                ([System.ConsoleKey]::LeftArrow), ([System.ConsoleKey]::Backspace) {
+                    if ($searchString.Length -gt 0) {
+                        $searchString = $searchString.Substring(0, $searchString.Length - 1)
+                        $currentCommandIndex = 0
+                        $commandListScrollOffset = 0
+                    } elseif ($keyInfo.Key -eq [System.ConsoleKey]::LeftArrow) { return $null }
+                }
+            }
+        }
+
+        $handleHelpOptionsInput = {
+            switch ($keyInfo.Key) {
+                ([System.ConsoleKey]::UpArrow) {
+                    if ($currentHelpOptionIndex -gt 0) { $currentHelpOptionIndex-- }
+                }
+                ([System.ConsoleKey]::DownArrow) {
+                    if ($currentHelpOptionIndex -lt ($helpOptions.Count - 1)) { $currentHelpOptionIndex++ }
+                }
+                ([System.ConsoleKey]::RightArrow), ([System.ConsoleKey]::Enter) {
+                    $selectedHelpType = $helpOptions[$currentHelpOptionIndex]
+                    $currentHelpContentLines = @("[grey]Fetching help...[/]")
+                    $helpContentScrollOffset = 0
+
+                    if ($selectedHelpType -eq "Parameters") {
+                        $allParamsCollection = $currentCommandObjectForHelp.CommandInfo.Parameters.Values
+                        $tempParameterList = New-Object System.Collections.Generic.List[System.Management.Automation.ParameterMetadata]
+
+                        $nonCommonParamsOutput = [System.Management.Automation.ParameterMetadata[]](
+                            $allParamsCollection | Where-Object { $commonParameterNames -notcontains $_.Name } | Sort-Object Name
+                        )
+                        if ($nonCommonParamsOutput) { $tempParameterList.AddRange($nonCommonParamsOutput) }
+
+                        $commonParamsFromCmdOutput = [System.Management.Automation.ParameterMetadata[]](
+                            $allParamsCollection | Where-Object { $commonParameterNames -contains $_.Name } | Sort-Object Name
+                        )
+                        if ($commonParamsFromCmdOutput) { $tempParameterList.AddRange($commonParamsFromCmdOutput) }
+                        
+                        $commandParametersForHelp = $tempParameterList.ToArray()
+                        $currentParameterIndex = 0
+                        $parameterListScrollOffset = 0
+                        $rightPaneView = 'ParameterList'
+                    } elseif ($selectedHelpType -eq "Online") {
+                        $currentHelpContentLines = @("[yellow]Press Right Arrow or Enter to open online help (if available), or Left Arrow to go back.[/]")
+                        $rightPaneView = 'HelpContent'
+                    } else {
+                        $rightPaneView = 'HelpContent'
+                        $LiveContext.Refresh()
+                        try {
+                            $helpText = ""
+                            switch($selectedHelpType) {
+                                "Examples" { $helpText = Get-Help $currentCommandObjectForHelp.CommandInfo -Examples | Out-String }
+                                "Detailed" { $helpText = Get-Help $currentCommandObjectForHelp.CommandInfo -Detailed | Out-String }
+                                "Full"     { $helpText = Get-Help $currentCommandObjectForHelp.CommandInfo -Full | Out-String }
+                            }
+                            $currentHelpContentLines = ($helpText | Get-SpectreEscapedText) -split "`r?`n"
+                            if ($currentHelpContentLines.Count -eq 0 -or ($currentHelpContentLines.Count -eq 1 -and [string]::IsNullOrWhiteSpace($currentHelpContentLines[0]))) {
+                                $currentHelpContentLines = @("grey[/]")
+                            }
+                        } catch {
+                            $currentHelpContentLines = @(("[red]Could not retrieve help: $($_.Exception.Message | Get-SpectreEscapedText)[/]" -split "`r?`n"))
+                        }
+                    }
+                }
+                ([System.ConsoleKey]::LeftArrow) { # Go back to Description view
+                    $rightPaneView = 'Description'
+                    $currentCommandObjectForHelp = $null
+                    $currentHelpContentLines = @(); $helpContentScrollOffset = 0
+                }
+            }
+        }
+
+        $handleParameterListInput = {
+            switch ($keyInfo.Key) {
+                ([System.ConsoleKey]::UpArrow) {
+                    if ($currentParameterIndex -gt 0) {
+                        $currentParameterIndex--
+                        if ($currentParameterIndex -lt $parameterListScrollOffset) { $parameterListScrollOffset = $currentParameterIndex }
+                    }
+                }
+                ([System.ConsoleKey]::DownArrow) {
+                    if ($commandParametersForHelp.Count -gt 0 -and $currentParameterIndex -lt ($commandParametersForHelp.Count - 1)) {
+                        $currentParameterIndex++
+                        if ($currentParameterIndex -ge ($parameterListScrollOffset + $parameterListPageSize)) { $parameterListScrollOffset++ }
+                    }
+                }
+                ([System.ConsoleKey]::RightArrow), ([System.ConsoleKey]::Enter) {
+                    if ($commandParametersForHelp.Count -gt 0 -and $currentParameterIndex -ge 0 -and $currentParameterIndex -lt $commandParametersForHelp.Count) {
+                        $currentParameterObjectForHelp = $commandParametersForHelp[$currentParameterIndex] # This is ParameterMetadata
+                        $currentHelpContentLines = @("[grey]Fetching parameter help...[/]")
+                        $helpContentScrollOffset = 0
+                        $rightPaneView = 'ParameterHelpContent'
+                        $LiveContext.Refresh()
+                        try {
+                            $paramHelpText = Get-Help $currentCommandObjectForHelp.Name -Parameter $currentParameterObjectForHelp.Name | Out-String
+                            if ([string]::IsNullOrWhiteSpace($paramHelpText) -and $currentParameterObjectForHelp.HelpMessage) {
+                                $paramHelpText = $currentParameterObjectForHelp.HelpMessage
+                            }
+
+                            if (-not [string]::IsNullOrWhiteSpace($paramHelpText)) {
+                                $currentHelpContentLines = ($paramHelpText | Get-SpectreEscapedText) -split "`r?`n"
+                            } else { $currentHelpContentLines = @("grey[/]") }
+                        } catch {
+                            $currentHelpContentLines = @(("[red]Could not retrieve help for parameter '$($currentParameterObjectForHelp.Name)': $($_.Exception.Message | Get-SpectreEscapedText)[/]" -split "`r?`n"))
+                        }
+                    }
+                }
+                ([System.ConsoleKey]::LeftArrow) { # Go back to Help Options
+                    $rightPaneView = 'HelpOptions'
+                    $commandParametersForHelp = @()
+                    $currentParameterObjectForHelp = $null
+                }
+            }
+        }
+
+        $handleHelpContentInput = {
+            switch ($keyInfo.Key) {
+                ([System.ConsoleKey]::LeftArrow) { # Go back to previous view
+                    if ($rightPaneView -eq 'ParameterHelpContent') { $rightPaneView = 'ParameterList' } 
+                    else { $rightPaneView = 'HelpOptions' }
+                    $currentHelpContentLines = @(); $helpContentScrollOffset = 0 # Clear content
+                }
+                ([System.ConsoleKey]::RightArrow), ([System.ConsoleKey]::Enter) { # Only for Online help
+                    if ($rightPaneView -eq 'HelpContent' -and $helpOptions[$currentHelpOptionIndex] -eq "Online") {
+                        try { Get-Help $currentCommandObjectForHelp.CommandInfo -Online }
+                        catch { $currentHelpContentLines = @("[red]Could not retrieve online help. Press Left to go back.[/]") }
+                    }
+                }
+                ([System.ConsoleKey]::UpArrow) { # Scroll up
+                    if ($helpContentScrollOffset -gt 0) { $helpContentScrollOffset-- }
+                }
+                ([System.ConsoleKey]::DownArrow) { # Scroll down
+                    if (($helpContentScrollOffset + $helpContentPageSize) -lt $currentHelpContentLines.Count) {
+                        $helpContentScrollOffset++
+                    }
+                }
+            }
+        }
+        # --- End Input Handling ScriptBlocks ---
+
         try {
             while ($true) {
                 # Recalculate dynamic page sizes if console was resized
@@ -694,8 +868,6 @@ function Show-ModuleCommandViewer {
             Read-SpectrePause -Message "[grey]Press Enter to acknowledge error and return...[/]" -NoNewline
             return $null
         }
-        # This return should ideally not be reached if Escape is the main exit.
-        return $null
     } # End Invoke-SpectreLive ScriptBlock
 
     Clear-Host # Clean up the console after exiting the live display
