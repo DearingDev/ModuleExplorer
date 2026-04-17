@@ -6,17 +6,14 @@ Insert any build steps you may need to take before publishing it here.
 #>
 param (
 	$ApiKey,
-	
+
 	$WorkingDirectory,
-	
+
 	$Repository = 'PSGallery',
-	
-	[switch]
-	$LocalRepo,
-	
+
 	[switch]
 	$SkipPublish,
-	
+
 	[switch]
 	$AutoVersion
 )
@@ -81,18 +78,8 @@ if ($AutoVersion)
 
 #region Publish
 if ($SkipPublish) { return }
-if ($LocalRepo)
-{
-	# Dependencies must go first
-	Write-Host  "Creating Nuget Package for module: PSFramework"
-	New-PSMDModuleNugetPackage -ModulePath (Get-Module -Name PSFramework).ModuleBase -PackagePath .
-	Write-Host  "Creating Nuget Package for module: ModuleExplorer"
-	New-PSMDModuleNugetPackage -ModulePath "$($publishDir.FullName)\ModuleExplorer" -PackagePath .
-}
-else
-{
-	# Publish to Gallery
-	Write-Host  "Publishing the ModuleExplorer module to $($Repository)"
-	Publish-Module -Path "$($publishDir.FullName)\ModuleExplorer" -NuGetApiKey $ApiKey -Force -Repository $Repository
-}
+
+# Publish to Gallery
+Write-Host  "Publishing the ModuleExplorer module to $($Repository)"
+Publish-Module -Path "$($publishDir.FullName)\ModuleExplorer" -NuGetApiKey $ApiKey -Force -Repository $Repository
 #endregion Publish

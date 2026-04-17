@@ -12,11 +12,31 @@
 ### Project Structure
 
 ```
-ModuleExplorer/        # Module source (.psm1, .psd1, functions)
-build/                 # Build scripts
-tests/                 # Pester tests
+ModuleExplorer/
+├── functions/
+│   ├── Show-ModuleExplorer.ps1        # Public: module picker TUI (entry point)
+│   └── Show-ModuleCommandViewer.ps1   # Public: command/help TUI (orchestrator)
+└── internal/
+    ├── functions/
+    │   ├── Get-ScrollableListView.ps1      # Reusable scrollable list renderer
+    │   ├── Get-CommandHelpContent.ps1      # Help fetcher (Examples/Detailed/Full/Online)
+    │   ├── Get-ParameterHelpContent.ps1    # Per-parameter help fetcher
+    │   ├── Get-SortedParameterList.ps1     # Sorts params: non-common first, then common
+    │   ├── Invoke-ViewerInputHandler.ps1   # State-machine input dispatcher
+    │   ├── Update-ViewerLayout.ps1         # Live layout renderer
+    │   └── New-ModuleDataProvider.ps1      # Data provider for PS module data
+    └── scripts/
+        └── UIConfig.ps1                    # $script:UIConfig — colors, strings, layout
+build/                 # Build/publish scripts
+tests/
+├── general/           # Module-level tests (manifest, PSScriptAnalyzer, help coverage)
+└── functions/         # Unit tests for internal helpers
 readme.md
 ```
+
+### Internal Architecture
+
+The command viewer is a five-state machine: `Description → HelpOptions → HelpContent / ParameterList → ParameterHelpContent`. All key-routing is in `Invoke-ViewerInputHandler`; all rendering in `Update-ViewerLayout`. Data is abstracted via a provider hashtable (`New-ModuleDataProvider`) passed through `$State.DataProvider`.
 
 ### Install / Run
 

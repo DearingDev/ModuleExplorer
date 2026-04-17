@@ -58,7 +58,7 @@ function Get-CommandHelpContent {
 
         $lines = ($helpText | Get-SpectreEscapedText) -split "`r?`n"
 
-        if ($lines.Count -eq 0 -or ($lines.Count -eq 1 -and [string]::IsNullOrWhiteSpace($lines[0]))) {
+        if (-not ($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
             return @('[grey](No content for this help type)[/]')
         }
 
