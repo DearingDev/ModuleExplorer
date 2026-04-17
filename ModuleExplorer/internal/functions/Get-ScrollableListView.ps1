@@ -65,10 +65,13 @@ function Get-ScrollableListView {
 
     $result = [System.Collections.Generic.List[string]]::new()
 
-    if ($Items.Count -eq 0 -or $SelectedIndex -lt 0) {
+    if ($Items.Count -eq 0) {
         $result.Add('[grey](No items to display)[/]')
         return $result.ToArray()
     }
+
+    # SelectedIndex = -1 means render without any selection highlight
+    if ($SelectedIndex -lt 0) { $SelectedIndex = -1 }
 
     # Scroll-indicator rows consume 1 row each; reserve slots for them so that
     # the visible content area never exceeds PageSize total rows.

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Displays an interactive viewer for commands (cmdlets, functions, aliases)
     within a selected PowerShell module.
@@ -96,13 +96,6 @@ function Show-ModuleCommandViewer {
         [PSObject]$SelectedModule
     )
 
-    # Define common PowerShell parameters
-    $commonParameterNames = @(
-        'Verbose', 'Debug', 'ErrorAction', 'ErrorVariable', 'WarningAction',
-        'WarningVariable', 'OutBuffer', 'OutVariable', 'PipelineVariable',
-        'InformationAction', 'InformationVariable', 'ProgressAction'
-    )
-
     $commands = Get-Command -Module $SelectedModule.Name | Sort-Object CommandType, Name
 
     if (-not $commands) {
@@ -111,7 +104,7 @@ function Show-ModuleCommandViewer {
         return
     }
 
-    # Pre-fetch command details, including synopsis
+    # Pre-fetch command details including synopsis
     $allCommandObjects = @($commands | ForEach-Object {
         $synopsis = ""
         try {
@@ -125,7 +118,6 @@ function Show-ModuleCommandViewer {
             }
         } catch {
             Write-Verbose "Failed to get help for command '$($_.Name)': $($_.Exception.Message)"
-            # Falls back to empty synopsis string
         }
 
         [PSCustomObject]@{
@@ -134,7 +126,7 @@ function Show-ModuleCommandViewer {
             Source      = $_.Source
             Definition  = $_.Definition
             Synopsis    = $synopsis
-            CommandInfo = $_ # Store the OG object
+            CommandInfo = $_
         }
     })
 
@@ -144,731 +136,84 @@ function Show-ModuleCommandViewer {
         return
     }
 
-    # Interactive Help Viewer with Invoke-SpectreLive
-    # Ratios are king, not sure I can resize without them
-    $initialCommandListContent = Write-SpectreHost "[grey]Loading command list...[/]" -PassThru | Format-SpectrePanel -Header "[bold]Commands[/]" -Expand -Border Rounded
-    $initialRightPanelContent = Write-SpectreHost "[grey]Select a command to see description.[/]" -PassThru | Format-SpectrePanel -Header "[bold]Description[/]" -Expand -Border Rounded
+    $cfg = $script:UIConfig
 
-    $commandListPaneLayout = New-SpectreLayout -Name "commandListPane" -Data $initialCommandListContent -Ratio 1
-    $rightPaneLayout = New-SpectreLayout -Name "rightPane" -Data $initialRightPanelContent -Ratio 3
-    $combinedPanel = New-SpectreLayout -Name "combinedPanel" -Columns @($commandListPaneLayout , $rightPaneLayout) -Ratio 20
+    # Build layout
+    $initialCmdContent   = Write-SpectreHost "[$($cfg.Colors.Muted)]$($cfg.Strings.LoadingCommands)[/]" -PassThru |
+        Format-SpectrePanel -Header '[bold]Commands[/]' -Expand -Border Rounded
+    $initialRightContent = Write-SpectreHost "[$($cfg.Colors.Muted)]$($cfg.Strings.SelectCommand)[/]" -PassThru |
+        Format-SpectrePanel -Header '[bold]Description[/]' -Expand -Border Rounded
 
-    $titleRenderable = Write-SpectreHost "[green bold]Cmdlets[/], [blue bold]Functions[/], and [magenta bold]Aliases[/] in $($SelectedModule.Name)" -PassThru | Format-SpectreAligned -HorizontalAlignment Center
-    $instructionsText = "[grey](↑/↓ Navigate | → Select | ← Back | Type to Search | Esc Exit)[/]"
-    $instructionsRenderable = Write-SpectreHost $instructionsText -PassThru | Format-SpectreAligned -HorizontalAlignment Center
-    $layout = New-SpectreLayout -Name "root" -Rows @($titleRenderable, $combinedPanel, $instructionsRenderable)
+    $commandListPaneLayout = New-SpectreLayout -Name 'commandListPane' -Data $initialCmdContent   -Ratio $cfg.Layout.CommandPaneRatio
+    $rightPaneLayout       = New-SpectreLayout -Name 'rightPane'       -Data $initialRightContent -Ratio $cfg.Layout.RightPaneRatio
+    $combinedPanel         = New-SpectreLayout -Name 'combinedPanel'   -Columns @($commandListPaneLayout, $rightPaneLayout) -Ratio 20
+
+    $titleText    = "[$($cfg.Colors.Cmdlet) bold]Cmdlets[/], [$($cfg.Colors.Function) bold]Functions[/], and [$($cfg.Colors.Alias) bold]Aliases[/] in $($SelectedModule.Name)"
+    $titleRow     = Write-SpectreHost $titleText -PassThru | Format-SpectreAligned -HorizontalAlignment Center
+    $instrRow     = Write-SpectreHost '[grey](↑/↓ Navigate | → Select | ← Back | Type to Search | Esc Exit)[/]' -PassThru |
+        Format-SpectreAligned -HorizontalAlignment Center
+    $layout       = New-SpectreLayout -Name 'root' -Rows @($titleRow, $combinedPanel, $instrRow)
+
+    # Initialize state
+    $dynamicPageSize = [Math]::Max($cfg.Layout.MinPageSize, $Host.UI.RawUI.WindowSize.Height - $cfg.Layout.FixedRowsOverhead)
+    $state = @{
+        AllCommands               = $allCommandObjects
+        FilteredCommands          = $allCommandObjects
+        View                      = 'Description'
+        CommandIndex              = 0
+        CommandListScrollOffset   = 0
+        CommandListPageSize       = $dynamicPageSize
+        SearchString              = ''
+        MaxNameLength             = $cfg.Layout.MinNameLength
+        HelpOptionIndex           = 0
+        HelpOptions               = $cfg.HelpOptions
+        Parameters                = @()
+        ParameterIndex            = 0
+        ParameterListScrollOffset = 0
+        ParameterListPageSize     = $dynamicPageSize
+        CurrentCommand            = $null
+        CurrentParameter          = $null
+        HelpContentLines          = @()
+        HelpContentScrollOffset   = 0
+        HelpContentPageSize       = $dynamicPageSize
+        LiveContext               = $null
+    }
 
     Invoke-SpectreLive -Data $layout -ScriptBlock {
-        param (
-            [Spectre.Console.LiveDisplayContext] $LiveContext
-        )
-
-        # Set default variables for the live UI
-        $currentCommandIndex = 0
-        $currentHelpOptionIndex = 0
-        $currentParameterIndex = 0
-        $rightPaneView = 'Description'
-
-        $searchString = ""
-        $filteredCommandObjects = $allCommandObjects
-        $currentCommandObjectForHelp = $null
-        $currentParameterObjectForHelp = $null
-        $commandParametersForHelp = @() # Holds Parameter objects, sorted with common params last
-
-        # Dynamic sizing based on console height
-        $fixedRowsOverhead = 4 # Approximate rows for title, instructions, borders
-        $dynamicPageSize = ($Host.UI.RawUI.WindowSize.Height - $fixedRowsOverhead)
-        if ($dynamicPageSize -lt 1) {$dynamicPageSize = 1} # Ensure at least 1
-
-        $commandListPageSize = $dynamicPageSize
-        $commandListScrollOffset = 0
-
-        $helpOptions = @("Examples", "Detailed", "Full", "Online", "Parameters")
-        $currentHelpContentLines = @() # Stores text current help view
-        $helpContentScrollOffset = 0
-        $helpContentPageSize = $dynamicPageSize
-
-        $parameterListPageSize = $dynamicPageSize
-        $parameterListScrollOffset = 0
-
-        $maxNameLength = 30 # Default/initial max name length
-
-        # --- Input Handling ScriptBlocks ---
-        $handleDescriptionInput = {
-            switch ($keyInfo.Key) {
-                ([System.ConsoleKey]::UpArrow) {
-                    if ($currentCommandIndex -gt 0) {
-                        $currentCommandIndex--
-                        if ($currentCommandIndex -lt $commandListScrollOffset) {
-                            $commandListScrollOffset = $currentCommandIndex # Snap to top
-                        }
-                    }
-                }
-                ([System.ConsoleKey]::DownArrow) {
-                    if ($commandListTotalItems -gt 0 -and $currentCommandIndex -lt ($commandListTotalItems - 1)) {
-                        $currentCommandIndex++
-                        if ($currentCommandIndex -ge ($commandListScrollOffset + $commandListPageSize - 2)) { # -2 to offset to account for the scroll indicators
-                            $commandListScrollOffset++ # Scroll down one line
-                        }
-                    }
-                }
-                ([System.ConsoleKey]::RightArrow) {
-                    if ($currentCommandIndex -ge 0 -and $currentCommandIndex -lt $filteredCommandObjects.Count) {
-                        $currentCommandObjectForHelp = $filteredCommandObjects[$currentCommandIndex]
-                        $rightPaneView = 'HelpOptions'
-                        $currentHelpOptionIndex = 0
-                        $searchString = "" # Clear search when moving to help
-                    }
-                }
-                ([System.ConsoleKey]::Enter) {
-                    if ($currentCommandIndex -ge 0 -and $currentCommandIndex -lt $filteredCommandObjects.Count) {
-                        $currentCommandObjectForHelp = $filteredCommandObjects[$currentCommandIndex]
-                        $rightPaneView = 'HelpOptions'
-                        $currentHelpOptionIndex = 0
-                        $searchString = ""
-                    }
-                }
-                ([System.ConsoleKey]::LeftArrow), ([System.ConsoleKey]::Backspace) {
-                    if ($searchString.Length -gt 0) {
-                        $searchString = $searchString.Substring(0, $searchString.Length - 1)
-                        $currentCommandIndex = 0
-                        $commandListScrollOffset = 0
-                    } elseif ($keyInfo.Key -eq [System.ConsoleKey]::LeftArrow) { return $null }
-                }
-            }
-        }
-
-        $handleHelpOptionsInput = {
-            switch ($keyInfo.Key) {
-                ([System.ConsoleKey]::UpArrow) {
-                    if ($currentHelpOptionIndex -gt 0) { $currentHelpOptionIndex-- }
-                }
-                ([System.ConsoleKey]::DownArrow) {
-                    if ($currentHelpOptionIndex -lt ($helpOptions.Count - 1)) { $currentHelpOptionIndex++ }
-                }
-                ([System.ConsoleKey]::RightArrow), ([System.ConsoleKey]::Enter) {
-                    $selectedHelpType = $helpOptions[$currentHelpOptionIndex]
-                    $currentHelpContentLines = @("[grey]Fetching help...[/]")
-                    $helpContentScrollOffset = 0
-
-                    if ($selectedHelpType -eq "Parameters") {
-                        $allParamsCollection = $currentCommandObjectForHelp.CommandInfo.Parameters.Values
-                        $tempParameterList = New-Object System.Collections.Generic.List[System.Management.Automation.ParameterMetadata]
-
-                        $nonCommonParamsOutput = [System.Management.Automation.ParameterMetadata[]](
-                            $allParamsCollection | Where-Object { $commonParameterNames -notcontains $_.Name } | Sort-Object Name
-                        )
-                        if ($nonCommonParamsOutput) { $tempParameterList.AddRange($nonCommonParamsOutput) }
-
-                        $commonParamsFromCmdOutput = [System.Management.Automation.ParameterMetadata[]](
-                            $allParamsCollection | Where-Object { $commonParameterNames -contains $_.Name } | Sort-Object Name
-                        )
-                        if ($commonParamsFromCmdOutput) { $tempParameterList.AddRange($commonParamsFromCmdOutput) }
-                        
-                        $commandParametersForHelp = $tempParameterList.ToArray()
-                        $currentParameterIndex = 0
-                        $parameterListScrollOffset = 0
-                        $rightPaneView = 'ParameterList'
-                    } elseif ($selectedHelpType -eq "Online") {
-                        $currentHelpContentLines = @("[yellow]Press Right Arrow or Enter to open online help (if available), or Left Arrow to go back.[/]")
-                        $rightPaneView = 'HelpContent'
-                    } else {
-                        $rightPaneView = 'HelpContent'
-                        $LiveContext.Refresh()
-                        try {
-                            $helpText = ""
-                            switch($selectedHelpType) {
-                                "Examples" { $helpText = Get-Help $currentCommandObjectForHelp.CommandInfo -Examples | Out-String }
-                                "Detailed" { $helpText = Get-Help $currentCommandObjectForHelp.CommandInfo -Detailed | Out-String }
-                                "Full"     { $helpText = Get-Help $currentCommandObjectForHelp.CommandInfo -Full | Out-String }
-                            }
-                            $currentHelpContentLines = ($helpText | Get-SpectreEscapedText) -split "`r?`n"
-                            if ($currentHelpContentLines.Count -eq 0 -or ($currentHelpContentLines.Count -eq 1 -and [string]::IsNullOrWhiteSpace($currentHelpContentLines[0]))) {
-                                $currentHelpContentLines = @("grey[/]")
-                            }
-                        } catch {
-                            $currentHelpContentLines = @(("[red]Could not retrieve help: $($_.Exception.Message | Get-SpectreEscapedText)[/]" -split "`r?`n"))
-                        }
-                    }
-                }
-                ([System.ConsoleKey]::LeftArrow) { # Go back to Description view
-                    $rightPaneView = 'Description'
-                    $currentCommandObjectForHelp = $null
-                    $currentHelpContentLines = @(); $helpContentScrollOffset = 0
-                }
-            }
-        }
-
-        $handleParameterListInput = {
-            switch ($keyInfo.Key) {
-                ([System.ConsoleKey]::UpArrow) {
-                    if ($currentParameterIndex -gt 0) {
-                        $currentParameterIndex--
-                        if ($currentParameterIndex -lt $parameterListScrollOffset) { $parameterListScrollOffset = $currentParameterIndex }
-                    }
-                }
-                ([System.ConsoleKey]::DownArrow) {
-                    if ($commandParametersForHelp.Count -gt 0 -and $currentParameterIndex -lt ($commandParametersForHelp.Count - 1)) {
-                        $currentParameterIndex++
-                        if ($currentParameterIndex -ge ($parameterListScrollOffset + $parameterListPageSize)) { $parameterListScrollOffset++ }
-                    }
-                }
-                ([System.ConsoleKey]::RightArrow), ([System.ConsoleKey]::Enter) {
-                    if ($commandParametersForHelp.Count -gt 0 -and $currentParameterIndex -ge 0 -and $currentParameterIndex -lt $commandParametersForHelp.Count) {
-                        $currentParameterObjectForHelp = $commandParametersForHelp[$currentParameterIndex] # This is ParameterMetadata
-                        $currentHelpContentLines = @("[grey]Fetching parameter help...[/]")
-                        $helpContentScrollOffset = 0
-                        $rightPaneView = 'ParameterHelpContent'
-                        $LiveContext.Refresh()
-                        try {
-                            $paramHelpText = Get-Help $currentCommandObjectForHelp.Name -Parameter $currentParameterObjectForHelp.Name | Out-String
-                            if ([string]::IsNullOrWhiteSpace($paramHelpText) -and $currentParameterObjectForHelp.HelpMessage) {
-                                $paramHelpText = $currentParameterObjectForHelp.HelpMessage
-                            }
-
-                            if (-not [string]::IsNullOrWhiteSpace($paramHelpText)) {
-                                $currentHelpContentLines = ($paramHelpText | Get-SpectreEscapedText) -split "`r?`n"
-                            } else { $currentHelpContentLines = @("grey[/]") }
-                        } catch {
-                            $currentHelpContentLines = @(("[red]Could not retrieve help for parameter '$($currentParameterObjectForHelp.Name)': $($_.Exception.Message | Get-SpectreEscapedText)[/]" -split "`r?`n"))
-                        }
-                    }
-                }
-                ([System.ConsoleKey]::LeftArrow) { # Go back to Help Options
-                    $rightPaneView = 'HelpOptions'
-                    $commandParametersForHelp = @()
-                    $currentParameterObjectForHelp = $null
-                }
-            }
-        }
-
-        $handleHelpContentInput = {
-            switch ($keyInfo.Key) {
-                ([System.ConsoleKey]::LeftArrow) { # Go back to previous view
-                    if ($rightPaneView -eq 'ParameterHelpContent') { $rightPaneView = 'ParameterList' } 
-                    else { $rightPaneView = 'HelpOptions' }
-                    $currentHelpContentLines = @(); $helpContentScrollOffset = 0 # Clear content
-                }
-                ([System.ConsoleKey]::RightArrow), ([System.ConsoleKey]::Enter) { # Only for Online help
-                    if ($rightPaneView -eq 'HelpContent' -and $helpOptions[$currentHelpOptionIndex] -eq "Online") {
-                        try { Get-Help $currentCommandObjectForHelp.CommandInfo -Online }
-                        catch { $currentHelpContentLines = @("[red]Could not retrieve online help. Press Left to go back.[/]") }
-                    }
-                }
-                ([System.ConsoleKey]::UpArrow) { # Scroll up
-                    if ($helpContentScrollOffset -gt 0) { $helpContentScrollOffset-- }
-                }
-                ([System.ConsoleKey]::DownArrow) { # Scroll down
-                    if (($helpContentScrollOffset + $helpContentPageSize) -lt $currentHelpContentLines.Count) {
-                        $helpContentScrollOffset++
-                    }
-                }
-            }
-        }
-        # --- End Input Handling ScriptBlocks ---
+        param([Spectre.Console.LiveDisplayContext]$LiveContext)
+        $state.LiveContext = $LiveContext
 
         try {
             while ($true) {
-                # Recalculate dynamic page sizes if console was resized
-                # This doesn't work when shrinking the console, but it does when expanding
-                # Will need to revisit to see if I can resolve that issue.
-                $consoleHeight = $Host.UI.RawUI.WindowSize.Height
-                $consoleWidth = $Host.UI.RawUI.WindowSize.Width
-
-                $newDynamicPageSize = ($consoleHeight - $fixedRowsOverhead)
-                if ($newDynamicPageSize -lt 1) {$newDynamicPageSize = 1}
-
-                if ($newDynamicPageSize -ne $dynamicPageSize) {
-                    $dynamicPageSize = $newDynamicPageSize
-                    $commandListPageSize = $dynamicPageSize
-                    $helpContentPageSize = $dynamicPageSize
-                    $parameterListPageSize = $dynamicPageSize
-
-                    # Re-clamp scroll offsets
-                    $commandListTotalItemsForClamp = $filteredCommandObjects.Count
-                    if ($commandListTotalItemsForClamp -gt 0) {
-                        $commandListScrollOffset = [System.Math]::Min($commandListScrollOffset, [System.Math]::Max(0, $commandListTotalItemsForClamp - $commandListPageSize))
-                    } else { $commandListScrollOffset = 0 }
-
-                    if ($commandParametersForHelp.Count -gt 0 -and $rightPaneView -eq 'ParameterList') {
-                        $parameterListScrollOffset = [System.Math]::Min($parameterListScrollOffset, [System.Math]::Max(0, $commandParametersForHelp.Count - $parameterListPageSize))
-                    } else { $parameterListScrollOffset = 0 }
-
-                    if ($currentHelpContentLines.Count -gt 0) {
-                        $helpContentScrollOffset = [System.Math]::Min($helpContentScrollOffset, [System.Math]::Max(0, $currentHelpContentLines.Count - $helpContentPageSize))
-                    } else { $helpContentScrollOffset = 0 }
+                # Recalculate page sizes on console resize
+                $newPageSize = [Math]::Max(
+                    $script:UIConfig.Layout.MinPageSize,
+                    $Host.UI.RawUI.WindowSize.Height - $script:UIConfig.Layout.FixedRowsOverhead
+                )
+                if ($newPageSize -ne $state.CommandListPageSize) {
+                    $state.CommandListPageSize   = $newPageSize
+                    $state.HelpContentPageSize   = $newPageSize
+                    $state.ParameterListPageSize = $newPageSize
                 }
 
-                # Calculate dynamic maxNameLength for command list truncation
-                $_commandListPaneLayoutRatio = $commandListPaneLayout.Ratio
-                $_rightPaneLayoutRatio = $rightPaneLayout.Ratio
-                $_totalColumnRatiosInCombinedPanel = $_commandListPaneLayoutRatio + $_rightPaneLayoutRatio
-
-                if ($_totalColumnRatiosInCombinedPanel -gt 0) {
-                    $commandListPaneNominalWidth = [Math]::Floor($consoleWidth * ($_commandListPaneLayoutRatio / $_totalColumnRatiosInCombinedPanel))
-                } else {
-                    # Fallback if ratios are zero or not found, though they should be 1 and 3.
-                    $commandListPaneNominalWidth = [Math]::Floor($consoleWidth / 4) # Default to 1/4 if ratios are problematic
-                }
-
-                $panelHorizontalOverhead = 4
-                $maxContentWidthInPanel = $commandListPaneNominalWidth - $panelHorizontalOverhead
-                $prefixCharsLength = 2
-                $currentMaxNameLength = $maxContentWidthInPanel - $prefixCharsLength
-                if ($currentMaxNameLength -lt 10) {$currentMaxNameLength = 10}
-                $maxNameLength = $currentMaxNameLength
-
-                # Filter command list based on search string
-                if ($searchString -ne "") {
-                    $filteredCommandObjects = $allCommandObjects | Where-Object { $_.Name -like "*$searchString*" }
-                    # Adjust current index and scroll if filter changes
-                    if ($currentCommandIndex -ge $filteredCommandObjects.Count -and $filteredCommandObjects.Count -gt 0) {
-                        $currentCommandIndex = $filteredCommandObjects.Count - 1
-                    } elseif ($filteredCommandObjects.Count -eq 0) { $currentCommandIndex = -1 }
-
-                    if ($currentCommandIndex -ne -1 -and ($currentCommandIndex -lt $commandListScrollOffset -or $currentCommandIndex -ge ($commandListScrollOffset + $commandListPageSize))) {
-                        $commandListScrollOffset = [System.Math]::Max(0, $currentCommandIndex - [System.Math]::Floor($commandListPageSize / 2))
-                    } elseif ($currentCommandIndex -eq -1) { $commandListScrollOffset = 0 }
-
-                    $commandListTotalItemsForClampOnSearch = $filteredCommandObjects.Count
-                    if ($commandListTotalItemsForClampOnSearch -gt 0) {
-                        $commandListScrollOffset = [System.Math]::Min($commandListScrollOffset, [System.Math]::Max(0, $commandListTotalItemsForClampOnSearch - $commandListPageSize))
-                    } else { $commandListScrollOffset = 0 }
-                } else {
-                    $filteredCommandObjects = $allCommandObjects
-                }
-                $commandListTotalItems = $filteredCommandObjects.Count
-
-                # Ensure currentCommandIndex is valid after filtering or list change
-                if ($commandListTotalItems -eq 0) {
-                    $currentCommandIndex = -1
-                    $commandListScrollOffset = 0
-                } elseif ($currentCommandIndex -eq -1 -or $currentCommandIndex -ge $commandListTotalItems) {
-                    # If previous selection is now invalid ( after clearing search)
-                    $currentCommandIndex = 0
-                    $commandListScrollOffset = 0
-                }
-
-                # Command List Panel (Left Pane)
-                $listItems = New-Object System.Collections.Generic.List[string]
-                $commandListPanelHeader = "[bold]($($commandListTotalItems) total)[/]"
-                if ($searchString -ne "") {
-                    $commandListPanelHeader += " Filter: [yellow]'$($searchString)'[/]"
-                }
-
-                if ($commandListTotalItems -gt 0 -and $currentCommandIndex -ne -1) {
-                    if ($commandListScrollOffset -gt 0) { $listItems.Add("[grey]  ↑ ...[/]")}
-
-                    $visibleListStartIndex = $commandListScrollOffset
-                    $visibleListEndIndex = [System.Math]::Min(($commandListScrollOffset + $commandListPageSize - 3), ($commandListTotalItems - 1))
-
-                    for ($i = $visibleListStartIndex; $i -le $visibleListEndIndex; $i++) {
-                        if ($i -lt 0 -or $i -ge $filteredCommandObjects.Count) { continue } # Boundary check
-                        $cmd = $filteredCommandObjects[$i]
-
-                        $originalDisplayName = $cmd.Name
-                        $processedDisplayName = $originalDisplayName
-
-                        if ($originalDisplayName.Length -gt $maxNameLength) {
-                            if ($maxNameLength -ge 3) {
-                                $processedDisplayName = $originalDisplayName.Substring(0, [Math]::Max(0, $maxNameLength - 3)) + "..."
-                            } else {
-                                $processedDisplayName = $originalDisplayName.Substring(0, [Math]::Max(0, $maxNameLength))
-                            }
-                        }
-
-                        $styledName = switch ($cmd.Type) {
-                            'Cmdlet'   { "[green]$processedDisplayName[/]" }
-                            'Function' { "[blue]$processedDisplayName[/]" }
-                            'Alias'    { "[magenta]$processedDisplayName[/]" }
-                            default    { $processedDisplayName }
-                        }
-                        if ($i -eq $currentCommandIndex) { $listItems.Add("[yellow bold]>[/] $($styledName)") }
-                        else { $listItems.Add("  $($styledName)") }
-                    }
-                    if ($visibleListEndIndex -lt ($commandListTotalItems - 1)) { $listItems.Add("[grey]  ↓ ...[/]")}
-                } else {
-                    $listItems.Add("[grey] (No commands to display) [/]")
-                }
-
-                $commandListPanel = $listItems | Format-SpectreRows | Format-SpectrePanel -Header $commandListPanelHeader -Expand -Border Rounded
-                $layout["commandListPane"].Update($commandListPanel) | Out-Null
-
-
-                # Right Pane for Command View (Description, Help Options, ParameterList, or Help Content)
-                $rightPanelContentRenderable = $null
-                $rightPanelHeader = "[bold]Info[/]"
-
-                if ($rightPaneView -eq 'Description') {
-                    $rightPanelHeader = "[bold]Description[/]"
-                    if ($currentCommandIndex -ge 0 -and $currentCommandIndex -lt $filteredCommandObjects.Count) {
-                        $currentCmdForDesc = $filteredCommandObjects[$currentCommandIndex]
-                        $rightPanelHeader = "[bold]Description for $($currentCmdForDesc.Name)[/]"
-                        $descriptionText = if ($currentCmdForDesc.Synopsis -and $currentCmdForDesc.Synopsis -ne "") {
-                            $currentCmdForDesc.Synopsis
-                        } elseif ($currentCmdForDesc.Type -eq 'Alias' -and $currentCmdForDesc.Definition) {
-                            "Alias for: $($currentCmdForDesc.Definition)"
-                        } else { "[grey]No synopsis available.[/]" }
-                        $rightPanelContentRenderable = ($descriptionText | Get-SpectreEscapedText | Format-SpectrePanel -Header $rightPanelHeader -Expand -Border Rounded)
-                    } else {
-                        $rightPanelContentRenderable = (Write-SpectreHost "[grey]No command selected or found.[/]" -PassThru | Format-SpectrePanel -Header $rightPanelHeader -Expand -Border Rounded)
-                    }
-                } elseif ($rightPaneView -eq 'HelpOptions') {
-                    $rightPanelHeader = "[bold]Help Options for $($currentCommandObjectForHelp.Name)[/]"
-                    $helpOptionListItems = for ($i = 0; $i -lt $helpOptions.Count; $i++) {
-                        if ($i -eq $currentHelpOptionIndex) { "[yellow bold]>[/] $($helpOptions[$i])" }
-                        else { "  $($helpOptions[$i])" }
-                    }
-                    $rightPanelContentRenderable = ($helpOptionListItems | Format-SpectreRows | Format-SpectrePanel -Header $rightPanelHeader -Expand -Border Rounded)
-
-                } elseif ($rightPaneView -eq 'ParameterList') {
-                    $rightPanelHeader = "[bold]Parameters for $($currentCommandObjectForHelp.Name)[/]"
-                    $paramListItems = New-Object System.Collections.Generic.List[string]
-                    if ($commandParametersForHelp.Count -gt 0) {
-                        if ($parameterListScrollOffset -gt 0) { $paramListItems.Add("[grey]  ↑ ...[/]")}
-
-                        $visibleParamListStartIndex = $parameterListScrollOffset
-                        $visibleParamListEndIndex = [System.Math]::Min(($parameterListScrollOffset + $parameterListPageSize - 1), ($commandParametersForHelp.Count - 1))
-
-                        for ($p = $visibleParamListStartIndex; $p -le $visibleParamListEndIndex; $p++) {
-                            if ($p -lt 0 -or $p -ge $commandParametersForHelp.Count) { continue }
-                            $paramMetadata = $commandParametersForHelp[$p]
-                            $paramName = $paramMetadata.Name
-                            $styledParamName = if ($commonParameterNames -contains $paramName) {
-                                "[grey]$paramName[/]"
-                            } else {
-                                $paramName
-                            }
-                            # Use $currentParameterIndex for highlighting in this view
-                            if ($p -eq $currentParameterIndex) { $paramListItems.Add("[yellow bold]>[/] $($styledParamName)") }
-                            else { $paramListItems.Add("  $($styledParamName)") }
-                        }
-                        if ($visibleParamListEndIndex -lt ($commandParametersForHelp.Count - 1)) { $paramListItems.Add("[grey]  ↓ ...[/]")}
-                    } else {
-                        $paramListItems.Add("[grey](No parameters found or command does not support parameters)[/]")
-                    }
-                    $rightPanelContentRenderable = ($paramListItems | Format-SpectreRows | Format-SpectrePanel -Header $rightPanelHeader -Expand -Border Rounded)
-
-                } elseif ($rightPaneView -eq 'HelpContent' -or $rightPaneView -eq 'ParameterHelpContent') {
-                    # Determine header based on whether it's general help or parameter-specific help
-                    if ($rightPaneView -eq 'ParameterHelpContent') {
-                        $rightPanelHeader = "[bold]Parameter: $($currentParameterObjectForHelp.Name) in $($currentCommandObjectForHelp.Name)[/]"
-                    } else { # HelpContent
-                        $rightPanelHeader = "[bold]Help: $($currentCommandObjectForHelp.Name) - $($helpOptions[$currentHelpOptionIndex])[/]"
-                    }
-
-                    # Display scrolled content
-                    $visibleHelpLines = New-Object System.Collections.Generic.List[string]
-                    if ($currentHelpContentLines.Count -gt 0) {
-                        if ($helpContentScrollOffset -gt 0) { $visibleHelpLines.Add("[grey]  ↑ ...[/]")}
-
-                        $helpViewEndIndex = [System.Math]::Min(($helpContentScrollOffset + $helpContentPageSize - 1), ($currentHelpContentLines.Count - 1))
-                        for ($l = $helpContentScrollOffset; $l -le $helpViewEndIndex; $l++) {
-                            if ($l -ge 0 -and $l -lt $currentHelpContentLines.Count) {
-                                $visibleHelpLines.Add($currentHelpContentLines[$l])
-                            }
-                        }
-
-                        if ($helpViewEndIndex -lt ($currentHelpContentLines.Count - 1)) { $visibleHelpLines.Add("[grey]  ↓ ...[/]")}
-                    } else {
-                        $visibleHelpLines.Add("[grey](No help content available for this view)[/]")
-                    }
-                    $rightPanelContentRenderable = ($visibleHelpLines | Format-SpectreRows | Format-SpectrePanel -Header $rightPanelHeader -Expand -Border Rounded)
-                }
-
-                $layout["rightPane"].Update($rightPanelContentRenderable) | Out-Null
-
+                Update-ViewerLayout -State $state -Layout $layout
                 $LiveContext.Refresh()
 
-                # Input handling
                 if (-not [Console]::KeyAvailable) { Start-Sleep -Milliseconds 50; continue }
                 $keyInfo = [Console]::ReadKey($true)
 
                 if ($keyInfo.Key -eq [System.ConsoleKey]::Escape) { return $null }
 
-                # Type to Search but only when in Description view
-                if ($rightPaneView -eq 'Description' -and
-                    (($keyInfo.KeyChar -ge 'a' -and $keyInfo.KeyChar -le 'z') -or
-                    ($keyInfo.KeyChar -ge 'A' -and $keyInfo.KeyChar -le 'Z') -or
-                    ($keyInfo.KeyChar -ge '0' -and $keyInfo.KeyChar -le '9') -or
-                    $keyInfo.KeyChar -eq '-' -or $keyInfo.KeyChar -eq '_' ) ) {
-                    $searchString += $keyInfo.KeyChar
-                    $currentCommandIndex = 0
-                    $commandListScrollOffset = 0
-                    continue # Re-render with new search
-                }
-
-                # More Input Handling!
-                if ($rightPaneView -eq 'Description') {
-                    switch ($keyInfo.Key) {
-                        ([System.ConsoleKey]::UpArrow) {
-                            if ($currentCommandIndex -gt 0) {
-                                $currentCommandIndex--
-                                if ($currentCommandIndex -lt $commandListScrollOffset) {
-                                    $commandListScrollOffset = $currentCommandIndex # Snap to top
-                                }
-                            }
-                        }
-                        ([System.ConsoleKey]::DownArrow) {
-                            if ($commandListTotalItems -gt 0 -and $currentCommandIndex -lt ($commandListTotalItems - 1)) {
-                                $currentCommandIndex++
-                                if ($currentCommandIndex -ge ($commandListScrollOffset + $commandListPageSize - 2)) { # -2 to offset to account for the scroll indicators
-                                    $commandListScrollOffset++ # Scroll down one line
-                                }
-                            }
-                        }
-                        ([System.ConsoleKey]::RightArrow) {
-                            if ($currentCommandIndex -ge 0 -and $currentCommandIndex -lt $filteredCommandObjects.Count) {
-                                $currentCommandObjectForHelp = $filteredCommandObjects[$currentCommandIndex]
-                                $rightPaneView = 'HelpOptions'
-                                $currentHelpOptionIndex = 0
-                                $searchString = "" # Clear search when moving to help
-                            }
-                        }
-                        ([System.ConsoleKey]::LeftArrow) { # Backspace for search or exit
-                            if ($searchString.Length -gt 0) {
-                                $searchString = $searchString.Substring(0, $searchString.Length - 1)
-                                $currentCommandIndex = 0
-                                $commandListScrollOffset = 0
-                            } else { return $null }
-                        }
-                        ([System.ConsoleKey]::Backspace) {
-                            if ($searchString.Length -gt 0) {
-                                $searchString = $searchString.Substring(0, $searchString.Length - 1)
-                                $currentCommandIndex = 0
-                                $commandListScrollOffset = 0
-                            }
-                        }
-                        ([System.ConsoleKey]::Enter) { # Same as RightArrow
-                            if ($currentCommandIndex -ge 0 -and $currentCommandIndex -lt $filteredCommandObjects.Count) {
-                                $currentCommandObjectForHelp = $filteredCommandObjects[$currentCommandIndex]
-                                $rightPaneView = 'HelpOptions'
-                                $currentHelpOptionIndex = 0
-                                $searchString = ""
-                            }
-                        }
-                    }
-                } elseif ($rightPaneView -eq 'HelpOptions') {
-                    switch ($keyInfo.Key) {
-                        ([System.ConsoleKey]::UpArrow) {
-                            if ($currentHelpOptionIndex -gt 0) { $currentHelpOptionIndex-- }
-                        }
-                        ([System.ConsoleKey]::DownArrow) {
-                            if ($currentHelpOptionIndex -lt ($helpOptions.Count - 1)) { $currentHelpOptionIndex++ }
-                        }
-                        ([System.ConsoleKey]::RightArrow) {
-                            $selectedHelpType = $helpOptions[$currentHelpOptionIndex]
-                            $currentHelpContentLines = @("[grey]Fetching help...[/]")
-                            $helpContentScrollOffset = 0
-
-                            if ($selectedHelpType -eq "Parameters") {
-                                $allParamsCollection = $currentCommandObjectForHelp.CommandInfo.Parameters.Values
-                                $tempParameterList = New-Object System.Collections.Generic.List[System.Management.Automation.ParameterMetadata]
-
-                                $nonCommonParamsOutput = [System.Management.Automation.ParameterMetadata[]](
-                                    $allParamsCollection | Where-Object { $commonParameterNames -notcontains $_.Name } | Sort-Object Name
-                                )
-                                if ($nonCommonParamsOutput) {
-                                    $tempParameterList.AddRange($nonCommonParamsOutput)
-                                }
-
-                                $commonParamsFromCmdOutput = [System.Management.Automation.ParameterMetadata[]](
-                                    $allParamsCollection | Where-Object { $commonParameterNames -contains $_.Name } | Sort-Object Name
-                                )
-                                if ($commonParamsFromCmdOutput) {
-                                    $tempParameterList.AddRange($commonParamsFromCmdOutput)
-                                }
-                                $commandParametersForHelp = $tempParameterList.ToArray()
-                                $currentParameterIndex = 0
-                                $parameterListScrollOffset = 0
-                                $rightPaneView = 'ParameterList'
-                            } elseif ($selectedHelpType -eq "Online") {
-                                $currentHelpContentLines = @("[yellow]Press Right Arrow or Enter to open online help (if available), or Left Arrow to go back.[/]")
-                                $rightPaneView = 'HelpContent'
-                            } else {
-                                $rightPaneView = 'HelpContent'
-                                $LiveContext.Refresh()
-                                try {
-                                    $helpText = ""
-                                    switch($selectedHelpType) {
-                                        "Examples" { $helpText = Get-Help $currentCommandObjectForHelp.CommandInfo -Examples | Out-String }
-                                        "Detailed" { $helpText = Get-Help $currentCommandObjectForHelp.CommandInfo -Detailed | Out-String }
-                                        "Full"     { $helpText = Get-Help $currentCommandObjectForHelp.CommandInfo -Full | Out-String }
-                                    }
-                                    $currentHelpContentLines = ($helpText | Get-SpectreEscapedText) -split "`r?`n"
-                                    if ($currentHelpContentLines.Count -eq 0 -or ($currentHelpContentLines.Count -eq 1 -and [string]::IsNullOrWhiteSpace($currentHelpContentLines[0]))) {
-                                        $currentHelpContentLines = @("[grey](No content for this help type)[/]")
-                                    }
-                                } catch {
-                                    $currentHelpContentLines = @(("[red]Could not retrieve help: $($_.Exception.Message | Get-SpectreEscapedText)[/]" -split "`r?`n"))
-                                }
-                            }
-                        }
-                        ([System.ConsoleKey]::LeftArrow) { # Go back to Description view
-                            $rightPaneView = 'Description'
-                            $currentCommandObjectForHelp = $null
-                            $currentHelpContentLines = @(); $helpContentScrollOffset = 0
-                        }
-                        ([System.ConsoleKey]::Enter) { # Same as RightArrow
-                            $selectedHelpType = $helpOptions[$currentHelpOptionIndex]
-                            $currentHelpContentLines = @("[grey]Fetching help...[/]")
-                            $helpContentScrollOffset = 0
-
-                            if ($selectedHelpType -eq "Parameters") {
-                                $allParamsCollection = $currentCommandObjectForHelp.CommandInfo.Parameters.Values
-                                $tempParameterList = New-Object System.Collections.Generic.List[System.Management.Automation.ParameterMetadata]
-
-                                $nonCommonParamsOutput = [System.Management.Automation.ParameterMetadata[]](
-                                    $allParamsCollection | Where-Object { $commonParameterNames -notcontains $_.Name } | Sort-Object Name
-                                )
-                                if ($nonCommonParamsOutput) {
-                                    $tempParameterList.AddRange($nonCommonParamsOutput)
-                                }
-
-                                $commonParamsFromCmdOutput = [System.Management.Automation.ParameterMetadata[]](
-                                    $allParamsCollection | Where-Object { $commonParameterNames -contains $_.Name } | Sort-Object Name
-                                )
-                                if ($commonParamsFromCmdOutput) {
-                                    $tempParameterList.AddRange($commonParamsFromCmdOutput)
-                                }
-                                $commandParametersForHelp = $tempParameterList.ToArray()
-                                $currentParameterIndex = 0
-                                $parameterListScrollOffset = 0
-                                $rightPaneView = 'ParameterList'
-                            } elseif ($selectedHelpType -eq "Online") {
-                                $currentHelpContentLines = @("[yellow]Press Right Arrow or Enter to open online help (if available), or Left Arrow to go back.[/]")
-                                $rightPaneView = 'HelpContent'
-                            } else {
-                                $rightPaneView = 'HelpContent'
-                                $LiveContext.Refresh()
-                                try {
-                                    $helpText = ""
-                                    switch($selectedHelpType) {
-                                        "Examples" { $helpText = Get-Help $currentCommandObjectForHelp.CommandInfo -Examples | Out-String }
-                                        "Detailed" { $helpText = Get-Help $currentCommandObjectForHelp.CommandInfo -Detailed | Out-String }
-                                        "Full"     { $helpText = Get-Help $currentCommandObjectForHelp.CommandInfo -Full | Out-String }
-                                    }
-                                    $currentHelpContentLines = ($helpText | Get-SpectreEscapedText) -split "`r?`n"
-                                    if ($currentHelpContentLines.Count -eq 0 -or ($currentHelpContentLines.Count -eq 1 -and [string]::IsNullOrWhiteSpace($currentHelpContentLines[0]))) {
-                                        $currentHelpContentLines = @("[grey](No content for this help type)[/]")
-                                    }
-                                } catch {
-                                    $currentHelpContentLines = @(("[red]Could not retrieve help: $($_.Exception.Message | Get-SpectreEscapedText)[/]" -split "`r?`n"))
-                                }
-                            }
-                        }
-                    }
-                } elseif ($rightPaneView -eq 'ParameterList') {
-                    switch ($keyInfo.Key) {
-                        ([System.ConsoleKey]::UpArrow) {
-                            if ($currentParameterIndex -gt 0) {
-                                $currentParameterIndex--
-                                if ($currentParameterIndex -lt $parameterListScrollOffset) {
-                                    $parameterListScrollOffset = $currentParameterIndex
-                                }
-                            }
-                        }
-                        ([System.ConsoleKey]::DownArrow) {
-                            if ($commandParametersForHelp.Count -gt 0 -and $currentParameterIndex -lt ($commandParametersForHelp.Count - 1)) {
-                                $currentParameterIndex++
-                                if ($currentParameterIndex -ge ($parameterListScrollOffset + $parameterListPageSize)) {
-                                    $parameterListScrollOffset++
-                                }
-                            }
-                        }
-                        ([System.ConsoleKey]::RightArrow) {
-                            if ($commandParametersForHelp.Count -gt 0 -and $currentParameterIndex -ge 0 -and $currentParameterIndex -lt $commandParametersForHelp.Count) {
-                                $currentParameterObjectForHelp = $commandParametersForHelp[$currentParameterIndex] # This is ParameterMetadata
-                                $currentHelpContentLines = @("[grey]Fetching parameter help...[/]")
-                                $helpContentScrollOffset = 0
-                                $rightPaneView = 'ParameterHelpContent'
-                                $LiveContext.Refresh()
-                                try {
-                                    $paramHelpText = Get-Help $currentCommandObjectForHelp.Name -Parameter $currentParameterObjectForHelp.Name | Out-String
-                                    if ([string]::IsNullOrWhiteSpace($paramHelpText) -and $currentParameterObjectForHelp.HelpMessage) { # Fallback
-                                        $paramHelpText = $currentParameterObjectForHelp.HelpMessage
-                                    }
-
-                                    if (-not [string]::IsNullOrWhiteSpace($paramHelpText)) {
-                                        $currentHelpContentLines = ($paramHelpText | Get-SpectreEscapedText) -split "`r?`n"
-                                    } else {
-                                        $currentHelpContentLines = @("[grey](No specific help message found for this parameter.)[/]")
-                                    }
-                                } catch {
-                                    $currentHelpContentLines = @(("[red]Could not retrieve help for parameter '$($currentParameterObjectForHelp.Name)': $($_.Exception.Message | Get-SpectreEscapedText)[/]" -split "`r?`n"))
-                                }
-                            }
-                        }
-                        ([System.ConsoleKey]::LeftArrow) { # Go back to Help Options
-                            $rightPaneView = 'HelpOptions'
-                            $commandParametersForHelp = @()
-                            $currentParameterObjectForHelp = $null
-                        }
-                        ([System.ConsoleKey]::Enter) { # Same as RightArrow
-                            if ($commandParametersForHelp.Count -gt 0 -and $currentParameterIndex -ge 0 -and $currentParameterIndex -lt $commandParametersForHelp.Count) {
-                                $currentParameterObjectForHelp = $commandParametersForHelp[$currentParameterIndex]
-                                $currentHelpContentLines = @("[grey]Fetching parameter help...[/]")
-                                $helpContentScrollOffset = 0
-                                $rightPaneView = 'ParameterHelpContent'
-                                $LiveContext.Refresh()
-                                try {
-                                    $paramHelpText = Get-Help $currentCommandObjectForHelp.Name -Parameter $currentParameterObjectForHelp.Name | Out-String
-                                    if ([string]::IsNullOrWhiteSpace($paramHelpText) -and $currentParameterObjectForHelp.HelpMessage) {
-                                        $paramHelpText = $currentParameterObjectForHelp.HelpMessage
-                                    }
-                                    if (-not [string]::IsNullOrWhiteSpace($paramHelpText)) {
-                                        $currentHelpContentLines = ($paramHelpText | Get-SpectreEscapedText) -split "`r?`n"
-                                    } else {
-                                        $currentHelpContentLines = @("[grey](No specific help message found for this parameter.)[/]")
-                                    }
-                                } catch {
-                                    $currentHelpContentLines = @(("[red]Could not retrieve help for parameter '$($currentParameterObjectForHelp.Name)': $($_.Exception.Message | Get-SpectreEscapedText)[/]" -split "`r?`n"))
-                                }
-                            }
-                        }
-                    }
-                } elseif ($rightPaneView -eq 'HelpContent' -or $rightPaneView -eq 'ParameterHelpContent') {
-                    switch ($keyInfo.Key) {
-                        ([System.ConsoleKey]::LeftArrow) { # Go back to previous view
-                            if ($rightPaneView -eq 'ParameterHelpContent') {
-                                $rightPaneView = 'ParameterList'
-                            } else { # HelpContent
-                                $rightPaneView = 'HelpOptions'
-                            }
-                            $currentHelpContentLines = @(); $helpContentScrollOffset = 0 # Clear content
-                        }
-                        ([System.ConsoleKey]::RightArrow) { # Only for Online help
-                            if ($rightPaneView -eq 'HelpContent' -and $helpOptions[$currentHelpOptionIndex] -eq "Online") {
-                                try { Get-Help $currentCommandObjectForHelp.CommandInfo -Online }
-                                catch { $currentHelpContentLines = @("[red]Could not retrieve online help. Press Left to go back.[/]") }
-                                # Don't automatically go back, let user see message if it fails.
-                            }
-                        }
-                        ([System.ConsoleKey]::Enter) { # Only for Online help
-                            if ($rightPaneView -eq 'HelpContent' -and $helpOptions[$currentHelpOptionIndex] -eq "Online") {
-                                try { Get-Help $currentCommandObjectForHelp.CommandInfo -Online }
-                                catch { $currentHelpContentLines = @("[red]Could not retrieve online help. Press Left to go back.[/]") }
-                            }
-                        }
-                        ([System.ConsoleKey]::UpArrow) { # Scroll up
-                            if ($helpContentScrollOffset -gt 0) { $helpContentScrollOffset-- }
-                        }
-                        ([System.ConsoleKey]::DownArrow) { # Scroll down
-                            if (($helpContentScrollOffset + $helpContentPageSize) -lt $currentHelpContentLines.Count) {
-                                $helpContentScrollOffset++
-                            }
-                        }
-                    }
-                }
-            } # End while ($true)
+                $result = Invoke-ViewerInputHandler -KeyInfo $keyInfo -State $state
+                if ($null -eq $result) { return $null }
+            }
         }
         catch {
-            # Catch any unexpected errors during the live display
             Write-SpectreHost "[bold red]Error within Invoke-SpectreLive: $($_.Exception.ToString() | Get-SpectreEscapedText)[/]"
-            Read-SpectrePause -Message "[grey]Press Enter to acknowledge error and return...[/]" -NoNewline
+            Read-SpectrePause -Message '[grey]Press Enter to acknowledge error and return...[/]' -NoNewline
             return $null
         }
-    } # End Invoke-SpectreLive ScriptBlock
+    }
 
-    Clear-Host # Clean up the console after exiting the live display
+    Clear-Host
 }
