@@ -1,4 +1,4 @@
-BeforeDiscovery {
+﻿BeforeDiscovery {
     if (-not (Get-Module ModuleExplorer)) {
         Import-Module (Join-Path $PSScriptRoot '..', '..', 'ModuleExplorer', 'ModuleExplorer.psm1') -Force
     }
@@ -312,3 +312,4 @@ Describe 'Invoke-ViewerInputHandler' {
         }
     }
 }
+

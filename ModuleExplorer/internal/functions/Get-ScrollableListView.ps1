@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Returns a window into a list of items suitable for rendering in a scrollable TUI pane.
 
@@ -41,6 +41,9 @@
 .EXAMPLE
     $lines = Get-ScrollableListView -Items $myItems -SelectedIndex 3 -ScrollOffset 1 -PageSize 10
     $lines | Format-SpectreRows | Format-SpectrePanel -Expand -Border Rounded
+
+    Returns a sliced window of items with scroll indicators if necessary, ready to be
+    displayed in a Spectre Console panel.
 #>
 function Get-ScrollableListView {
     [CmdletBinding()]
@@ -109,3 +112,4 @@ function Get-ScrollableListView {
 
     return $result.ToArray()
 }
+

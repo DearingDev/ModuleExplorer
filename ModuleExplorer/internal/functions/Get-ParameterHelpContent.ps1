@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Fetches and formats parameter-specific help content into Spectre-safe string lines.
 
@@ -32,6 +32,9 @@
                 -CommandName   $state.CurrentCommand.Name `
                 -ParameterName $selectedParam.Name `
                 -FallbackHelpMessage $selectedParam.HelpMessage
+
+    Retrieves and formats the help content for a specific parameter, using a fallback
+    message if the help content is empty.
 #>
 function Get-ParameterHelpContent {
     [CmdletBinding()]
@@ -66,3 +69,4 @@ function Get-ParameterHelpContent {
         return @("[red]Could not retrieve help for parameter '$escapedName': $escapedMsg[/]")
     }
 }
+

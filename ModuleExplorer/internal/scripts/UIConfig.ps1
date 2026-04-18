@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Centralizes all hardcoded UI configuration values for the ModuleExplorer module.
 
@@ -64,3 +64,4 @@ $script:UIConfig = @{
         'InformationAction', 'InformationVariable', 'ProgressAction'
     )
 }
+

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Returns a command's parameters sorted with non-common parameters first.
 
@@ -27,7 +27,8 @@
 
 .EXAMPLE
     $sorted = Get-SortedParameterList -Parameters $commandInfo.Parameters.Values
-    # Use $sorted as the $commandParametersForHelp list in the viewer
+
+    Sorts the command parameters such that common parameters are at the bottom of the list.
 #>
 function Get-SortedParameterList {
     [CmdletBinding()]
@@ -59,3 +60,4 @@ function Get-SortedParameterList {
 
     return $ordered.ToArray()
 }
+

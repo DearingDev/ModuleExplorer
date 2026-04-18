@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Renders the current viewer state into the live Spectre Console layout.
 
@@ -21,6 +21,13 @@
 .PARAMETER Layout
     The root Spectre Console layout object. Must have named children
     'commandListPane' and 'rightPane'.
+
+.EXAMPLE
+    Update-ViewerLayout -State $state -Layout $layout
+    $state.LiveContext.Refresh()
+
+    Calculates the new layout based on the current state (filtering, selection, scroll)
+    and updates the Spectre Console layout object.
 #>
 function Update-ViewerLayout {
     [CmdletBinding()]
@@ -171,3 +178,4 @@ function Update-ViewerLayout {
 
     $Layout['rightPane'].Update($rightRenderable) | Out-Null
 }
+

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Routes a console key press to the correct handler for the viewer's current state.
 
@@ -23,6 +23,13 @@
 .OUTPUTS
     $null  — caller should exit the viewer loop.
     $true  — caller should continue the viewer loop.
+
+.EXAMPLE
+    $keyInfo = [Console]::ReadKey($true)
+    $result = Invoke-ViewerInputHandler -KeyInfo $keyInfo -State $state
+
+    Processes the key press based on the current view in the state hashtable and updates
+    the state accordingly.
 #>
 function Invoke-ViewerInputHandler {
     [CmdletBinding()]
@@ -218,3 +225,4 @@ function Invoke-ViewerParameterSelect {
         $State.HelpContentLines = @(& $State.DataProvider.GetChildContent $State.CurrentCommand $State.CurrentParameter)
     }
 }
+

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Creates a data provider for browsing a PowerShell module's commands.
 
@@ -23,6 +23,13 @@
 
 .OUTPUTS
     [hashtable]
+
+.EXAMPLE
+    $provider = New-ModuleDataProvider -ModuleName 'Pester'
+    $items = & $provider.GetItems
+
+    Creates a provider for the Pester module and retrieves its commands as a collection
+    of PSCustomObjects.
 #>
 function New-ModuleDataProvider {
     [CmdletBinding()]
@@ -99,3 +106,4 @@ function New-ModuleDataProvider {
         }
     }
 }
+

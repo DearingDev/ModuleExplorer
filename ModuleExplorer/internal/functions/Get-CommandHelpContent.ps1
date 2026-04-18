@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Fetches and formats help content for a PowerShell command into Spectre-safe string lines.
 
@@ -30,7 +30,9 @@
 
 .EXAMPLE
     $lines = Get-CommandHelpContent -HelpType 'Examples' -CommandInfo $cmd.CommandInfo
-    # Store in $currentHelpContentLines for the viewer to render
+
+    Retrieves the Examples help section for the specified command and returns it as
+    an array of Spectre-escaped strings.
 #>
 function Get-CommandHelpContent {
     [CmdletBinding()]
@@ -69,3 +71,4 @@ function Get-CommandHelpContent {
         return @("[red]Could not retrieve help: $escapedMsg[/]")
     }
 }
+

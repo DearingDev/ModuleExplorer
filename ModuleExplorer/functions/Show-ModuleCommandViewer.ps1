@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Displays an interactive viewer for commands (cmdlets, functions, aliases)
     within a selected PowerShell module.
@@ -29,6 +29,11 @@
     This object MUST have a 'Name' property containing the string name of the module
     (e.g., as returned by Get-Module). This parameter is mandatory. It is provided
     by the caller of this function, the Show-ModuleExplorer function.
+
+.PARAMETER DataProvider
+    An optional hashtable providing the data and logic for the viewer. If not supplied,
+    a default provider for the selected module is created using New-ModuleDataProvider.
+    This allows for dependency injection or alternative data sources.
 
 .INPUTS
     System.Management.Automation.PSObject
@@ -192,3 +197,4 @@ function Show-ModuleCommandViewer {
 
     Clear-Host
 }
+
